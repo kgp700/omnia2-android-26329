@@ -32,8 +32,19 @@
 #define SET_RTC_DEFAULT_RESET_TIME
 #define CONFIG_RTC_SYNC
 
+#define I8000_RTC
+//I8000_RTC means: the problem caused by to store the localtime in the RTC
+// in Windows CE elimination: the very first set of the RTC time not executed
+// ( no value stored in the RTC, but from now the difference stored in a variable
+// and each corresponding set/get RTC time call will adjust the read/write values
+// with that ). In this way the RTC will contain always the local time untouched, but the
+// system "knows" it is in UTC. Because the first gettime anyhow results local time
+// instead of UTC, on the android part must issue a hwclock -l -s command to correct it!
+
+#ifdef I8000_RTC
 // The year value in the RTC (from WinMo) contains a +20 year difference in i8000
 #define I8000_YEAR_CORRECT 20
+#endif
 
 #ifdef CONFIG_RTC_SYNC
 #include <linux/cpufreq.h>
@@ -289,6 +300,10 @@ static int s3c_rtc_setfreq(struct device *dev, int freq)
 }
 
 /* Time read/write */
+#ifdef I8000_RTC
+static int zone_diff=0;		// the timezone difference, valid after the first set RTC time call
+static int already_set=0;	// marker for valid zone_diff
+#endif
 
 static int s3c_rtc_gettime(struct device *dev, struct rtc_time *rtc_tm)
 {
@@ -305,6 +320,7 @@ static int s3c_rtc_gettime(struct device *dev, struct rtc_time *rtc_tm)
 	rtc_tm->tm_sec  = readb(base + S3C_RTCSEC);
 
 	year_bin = bcd2bin(rtc_tm->tm_year) - I8000_YEAR_CORRECT; //bss
+//	rtc_tm->tm_year = bin2bcd(year_bin);	//bss
 
 	/* the only way to work out wether the system was mid-update
 	 * when we read it is to check the second counter, and if it
@@ -329,9 +345,17 @@ static int s3c_rtc_gettime(struct device *dev, struct rtc_time *rtc_tm)
 
 	rtc_tm->tm_year += 100;
 	rtc_tm->tm_mon -= 1;
+#ifdef I8000_RTC
+///////// special i8000! RTC store the locale time not UTC, so we must cheat.....
+	  if (!already_set) {
+		rtc_tm->tm_hour = rtc_tm->tm_hour-9;
+		if (rtc_tm->tm_hour<0) { rtc_tm->tm_hour+=24; rtc_tm->tm_mday--;} 
+		if (rtc_tm->tm_hour>=24) { rtc_tm->tm_hour-=24; rtc_tm->tm_mday++;}
+	  }
+#endif
 	pr_debug("read time %02d.%02d.%02d %02d:%02d:%02d\n",
-	rtc_tm->tm_year, rtc_tm->tm_mon, rtc_tm->tm_mday,
-	rtc_tm->tm_hour, rtc_tm->tm_min, rtc_tm->tm_sec);
+	 rtc_tm->tm_year, rtc_tm->tm_mon, rtc_tm->tm_mday,
+	 rtc_tm->tm_hour, rtc_tm->tm_min, rtc_tm->tm_sec);
 
 	return 0;
 }
@@ -350,6 +374,16 @@ static int s3c_rtc_settime(struct device *dev, struct rtc_time *tm)
 	rtc_sync_start_save_delta ();
 #endif	/* CONFIG_RTC_SYNC */
 
+#ifdef I8000_RTC
+	if ( !already_set ) {
+		already_set=1;
+		tm->tm_hour=tm->tm_hour;	// the difference in tz + 1!
+		printk("I8000 TZ diff: %d hours\n",zone_diff);
+		return 0;
+	}
+	if (tm->tm_hour<0) { tm->tm_hour+=24; tm->tm_mday--;}
+	if (tm->tm_hour>=24) { tm->tm_hour-=24; tm->tm_mday++;}
+#endif
 	/* we get around y2k by simply not supporting it */
 
 	if (year < 0 || year >= 100) {
@@ -628,7 +662,7 @@ static int s3c_rtc_probe(struct platform_device *pdev)
 	struct rtc_device *rtc;
 	struct resource *res;
 	int ret;
-	unsigned char bcd_tmp,bcd_loop;
+	//unsigned char bcd_tmp,bcd_loop;
 
 	pr_debug("%s: probe=%p\n", __func__, pdev);
 
