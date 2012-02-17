@@ -29,16 +29,16 @@
  * It helps to keep variable names smaller, simpler
  */
 
-#define DEF_FREQUENCY_UP_THRESHOLD		(70)
-#define DEF_FREQUENCY_DOWN_THRESHOLD		(40)
+#define DEF_FREQUENCY_UP_THRESHOLD		(95)
+#define DEF_FREQUENCY_DOWN_THRESHOLD		(70)
 #ifdef CONFIG_CPU_S3C6410
 #define DEF_MAX_FREQ_TIME_HZ			(15*HZ)
-#define DEF_SAMPLING_FREQ_STEP	20
+#define DEF_SAMPLING_FREQ_STEP	40
 extern int dvfs_change_quick;
 static int dvfs_max_freq_cnt = 0;
 extern unsigned int s3c64xx_target_frq(unsigned int pred_freq, int flag);
 #else
-#define DEF_SAMPLING_FREQ_STEP 5
+#define DEF_SAMPLING_FREQ_STEP 15
 #endif /* CONFIG_CPU_S3C6410 */
 
 /*
@@ -107,7 +107,7 @@ static struct dbs_tuners {
 #ifdef CONFIG_CPU_S3C6410
 	.freq_step = DEF_SAMPLING_FREQ_STEP,
 #else
-	.freq_step = 5,
+	.freq_step = 40,
 #endif /* CONFIG_CPU_S3C6410 */
 };
 
@@ -688,7 +688,7 @@ static int __init cpufreq_gov_dbs_init(void)
 {
 	int err;
 	if(conservative_workqueue_init == 0){
-	kconservative_wq = create_workqueue("kconservative");
+	kconservative_wq = create_rt_workqueue("kconservative");
 	if (!kconservative_wq) {
 		printk(KERN_ERR "Creation of kconservative failed\n");
 		return -EFAULT;
