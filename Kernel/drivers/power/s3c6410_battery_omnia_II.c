@@ -1602,8 +1602,8 @@ charger_type_t status = 0;
 
 	mutex_lock(&work_lock);
 
-	if (gpio_get_value(gpio_ta_connected)) {
-		if (0) //(get_usb_power_state())
+	if (!gpio_get_value(gpio_ta_connected)) {
+		if (get_usb_power_state())
 			status = CHARGER_USB;		    
 		else
 			status = CHARGER_AC;
