@@ -32,6 +32,9 @@
 #define SET_RTC_DEFAULT_RESET_TIME
 #define CONFIG_RTC_SYNC
 
+// The year value in the RTC (from WinMo) contains a +20 year difference in i8000
+#define I8000_YEAR_CORRECT 20
+
 #ifdef CONFIG_RTC_SYNC
 #include <linux/cpufreq.h>
 
@@ -41,8 +44,7 @@
 
 
 #ifdef SET_RTC_DEFAULT_RESET_TIME
-#define DEFAULT_RESET_TIME_YEAR 	(2001) //factory sequence
-#define DEFAULT_RESET_TIME_YEAR_MAX (2037)
+#define DEFAULT_RESET_TIME_YEAR 	(2000)
 #define DEFAULT_RESET_TIME_MON	 	(1)
 #define DEFAULT_RESET_TIME_DATE	 	(1)
 #define DEFAULT_RESET_TIME_HOUR 	(0)
@@ -171,15 +173,12 @@ static void rtc_sync_work_handler(struct work_struct * __unused)
 	int 			next_interval;
 	int 			cpu_idle;
 
-	if (rtc_sync_state == RS_SAVE_DELTA)
+	switch (rtc_sync_state)
 	{
+	case RS_SAVE_DELTA:
 		rtc_sync_save_delta();
 		rtc_sync_start();
 		return;
-	}
-
-	switch (rtc_sync_state)
-	{
 	case RS_WAIT_ADJUST_TIME:
 		/* start adjust service */
 		busy_count = 0;
@@ -295,6 +294,7 @@ static int s3c_rtc_gettime(struct device *dev, struct rtc_time *rtc_tm)
 {
 	unsigned int have_retried = 0;
 	void __iomem *base = s3c_rtc_base;
+	int year_bin;
 
  retry_get_time:
 	rtc_tm->tm_min  = readb(base + S3C_RTCMIN);
@@ -303,6 +303,8 @@ static int s3c_rtc_gettime(struct device *dev, struct rtc_time *rtc_tm)
 	rtc_tm->tm_mon  = readb(base + S3C_RTCMON);
 	rtc_tm->tm_year = readb(base + S3C_RTCYEAR);
 	rtc_tm->tm_sec  = readb(base + S3C_RTCSEC);
+
+	year_bin = bcd2bin(rtc_tm->tm_year) - I8000_YEAR_CORRECT; //bss
 
 	/* the only way to work out wether the system was mid-update
 	 * when we read it is to check the second counter, and if it
@@ -314,7 +316,7 @@ static int s3c_rtc_gettime(struct device *dev, struct rtc_time *rtc_tm)
 		goto retry_get_time;
 	}
 
-	pr_debug("read time %02x.%02x.%02x %02x/%02x/%02x\n",
+	pr_debug("BCD time  %02x.%02x.%02x %02x:%02x:%02x\n",
 		 rtc_tm->tm_year, rtc_tm->tm_mon, rtc_tm->tm_mday,
 		 rtc_tm->tm_hour, rtc_tm->tm_min, rtc_tm->tm_sec);
 
@@ -323,25 +325,13 @@ static int s3c_rtc_gettime(struct device *dev, struct rtc_time *rtc_tm)
 	rtc_tm->tm_hour = bcd2bin(rtc_tm->tm_hour);
 	rtc_tm->tm_mday = bcd2bin(rtc_tm->tm_mday);
 	rtc_tm->tm_mon = bcd2bin(rtc_tm->tm_mon);
-	rtc_tm->tm_year = bcd2bin(rtc_tm->tm_year);
+	rtc_tm->tm_year = year_bin; //bcd2bin(rtc_tm->tm_year);
 
 	rtc_tm->tm_year += 100;
 	rtc_tm->tm_mon -= 1;
-
-	//factory sequence
-	if((rtc_tm->tm_year < (DEFAULT_RESET_TIME_YEAR - 1900)) || (rtc_tm->tm_year > (DEFAULT_RESET_TIME_YEAR_MAX - 1900)))
-	{
-		rtc_tm->tm_sec = DEFAULT_RESET_TIME_SEC;
-		rtc_tm->tm_min = DEFAULT_RESET_TIME_MIN;
-		rtc_tm->tm_hour = DEFAULT_RESET_TIME_HOUR;
-		rtc_tm->tm_mday = DEFAULT_RESET_TIME_DATE;
-		rtc_tm->tm_mon = DEFAULT_RESET_TIME_MON - 1;
-		rtc_tm->tm_year = DEFAULT_RESET_TIME_YEAR - 1900;
-	}
-
-	pr_debug("read time %02d/%02d/%02d %02d.%02d.%02d\n",
-		 rtc_tm->tm_year, rtc_tm->tm_mon, rtc_tm->tm_mday,
-		 rtc_tm->tm_hour, rtc_tm->tm_min, rtc_tm->tm_sec);
+	pr_debug("read time %02d.%02d.%02d %02d:%02d:%02d\n",
+	rtc_tm->tm_year, rtc_tm->tm_mon, rtc_tm->tm_mday,
+	rtc_tm->tm_hour, rtc_tm->tm_min, rtc_tm->tm_sec);
 
 	return 0;
 }
@@ -351,7 +341,7 @@ static int s3c_rtc_settime(struct device *dev, struct rtc_time *tm)
 	void __iomem *base = s3c_rtc_base;
 	int year = tm->tm_year - 100;
 
-	pr_debug("set time %02d.%02d.%02d %02d/%02d/%02d\n",
+	pr_debug("set time %02d.%02d.%02d %02d:%02d:%02d\n",
 		 tm->tm_year, tm->tm_mon, tm->tm_mday,
 		 tm->tm_hour, tm->tm_min, tm->tm_sec);
 
@@ -372,7 +362,7 @@ static int s3c_rtc_settime(struct device *dev, struct rtc_time *tm)
 	writeb(bin2bcd(tm->tm_hour), base + S3C_RTCHOUR);
 	writeb(bin2bcd(tm->tm_mday), base + S3C_RTCDATE);
 	writeb(bin2bcd(tm->tm_mon + 1), base + S3C_RTCMON);
-	writeb(bin2bcd(year), base + S3C_RTCYEAR);
+	writeb(bin2bcd(year + I8000_YEAR_CORRECT), base + S3C_RTCYEAR); //bss
 
 	return 0;
 }
@@ -429,9 +419,10 @@ static int s3c_rtc_getalarm(struct device *dev, struct rtc_wkalrm *alrm)
 		alm_tm->tm_mon = 0xff;
 	}
 
-	if (alm_en & S3C_RTCALM_YEAREN)
-		alm_tm->tm_year = bcd2bin(alm_tm->tm_year);
-	else
+	if (alm_en & S3C_RTCALM_YEAREN) {
+		alm_tm->tm_year = bcd2bin(alm_tm->tm_year)-I8000_YEAR_CORRECT;
+		alm_tm->tm_year += 100;
+	} else
 		alm_tm->tm_year = 0xffff;
 
 	return 0;
@@ -445,7 +436,7 @@ static int s3c_rtc_setalarm(struct device *dev, struct rtc_wkalrm *alrm)
 
 	int year = tm->tm_year - 100;
 
-	pr_debug("s3c_rtc_setalarm: %d, %02x/%02x/%02x %02x.%02x.%02x\n",
+	pr_debug("s3c_rtc_setalarm: %d, %02d/%02d/%02d %02d:%02d:%02d\n",
 		 alrm->enabled,
 		 tm->tm_mday & 0xff, tm->tm_mon & 0xff, tm->tm_year & 0xff,
 		 tm->tm_hour & 0xff, tm->tm_min & 0xff, tm->tm_sec);
@@ -480,7 +471,7 @@ static int s3c_rtc_setalarm(struct device *dev, struct rtc_wkalrm *alrm)
 
 	if (year < 100 && year >= 0) {
 		alrm_en |= S3C_RTCALM_YEAREN;
-		writeb(bin2bcd(year), base + S3C_ALMYEAR);
+		writeb(bin2bcd(year+I8000_YEAR_CORRECT), base + S3C_ALMYEAR);
 	}
 
 	pr_debug("setting S3C_RTCALM to %08x\n", alrm_en);
@@ -609,7 +600,7 @@ static void s3c_rtc_enable(struct platform_device *pdev, int en)
 		return;
 
 	s3c_rtc_enable_set(pdev,base,en);
-		}
+}
 
 static int s3c_rtc_remove(struct platform_device *dev)
 {

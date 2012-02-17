@@ -19,14 +19,19 @@
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
 
-#include <asm/dma.h>
 #include <mach/map.h>
 
 #include <mach/hardware.h>
 #include <plat/gpio-cfg.h>
+#include <linux/gpio.h>
+
 #ifdef CONFIG_S3C_DMA_PL080_SOL
 #include <plat/s3c6410-dma.h>
 #endif
+
+#include <mach/dma.h>
+#include <plat/dma.h>
+
 #include "s3c-pcm.h"
 #include "s3c6410-i2s.h"
 
@@ -101,11 +106,10 @@ static void s3c_snd_txctrl(int on)
 	} else {
 	
 		//if recording is running, do not disable IIS clock
-		if ( (iiscon & S3C_IISCON_RXDMACTIVE) != S3C_IISCON_RXDMACTIVE)
-			{
-		iiscon &= ~S3C_IISCON_I2SACTIVE;
+		if ( (iiscon & S3C_IISCON_RXDMACTIVE) != S3C_IISCON_RXDMACTIVE) {
+			iiscon &= ~S3C_IISCON_I2SACTIVE;
 			debug_msg("I2S off\n");
-			}
+		}
 		iiscon  |= S3C_IISCON_TXCHPAUSE;
 		iiscon  |= S3C_IISCON_TXDMAPAUSE;
 		iiscon  &= ~S3C_IISCON_TXDMACTIVE;
@@ -130,11 +134,10 @@ static void s3c_snd_rxctrl(int on)
 	}else{
 	
 		//if playback is running, do not disable IIS clock
-		if ( (iiscon & S3C_IISCON_TXDMACTIVE)  != S3C_IISCON_TXDMACTIVE)
-			{
+		if ( (iiscon & S3C_IISCON_TXDMACTIVE)  != S3C_IISCON_TXDMACTIVE) {
 			iiscon &= ~S3C_IISCON_I2SACTIVE;
 			debug_msg("I2S off\n");
-			}
+		}
 		
 		iiscon  |= S3C_IISCON_RXCHPAUSE;
 		iiscon  |= S3C_IISCON_RXDMAPAUSE;
@@ -287,7 +290,7 @@ static int s3c_i2s_hw_params(struct snd_pcm_substream *substream,
 	writel(iismod, s3c_i2s.regs + S3C_IISMOD);
 
 
-	debug_msg("s3c iis mode: 0x%08x\n", readl(s3c6410_i2s.regs + S3C64XX_IIS0MOD));
+	debug_msg("s3c iis mode: 0x%08x\n", readl(s3c_i2s.regs + S3C64XX_IIS0MOD));
 	debug_msg("s3c: params_channels %d\n", params_channels(params));
 	debug_msg("s3c: params_format %d\n", params_format(params));
 	debug_msg("s3c: params_subformat %d\n", params_subformat(params));
@@ -571,6 +574,7 @@ static int s3c_i2s_set_clkdiv(struct snd_soc_dai *cpu_dai,
 {
 	u32 reg;
 
+
 	debug_msg("%s\n", __FUNCTION__);
 
 	switch (div_id) {
@@ -652,16 +656,16 @@ static int s3c_i2s_probe(struct platform_device *pdev,
 	s3c_i2s.regs = ioremap(S3C_IIS_PABASE, 0x100);
 
 	/* Configure the I2S pins in correct mode */
-	s3c_gpio_cfgpin(GPIO_I2S_LRCLK, S3C_GPIO_SFN(GPIO_I2S_LRCLK_AF)); 
-	s3c_gpio_cfgpin(GPIO_I2S_CLK, S3C_GPIO_SFN(GPIO_I2S_CLK_AF)); 
-	s3c_gpio_cfgpin(GPIO_I2S_DI, S3C_GPIO_SFN(GPIO_I2S_DI_AF));   
-	s3c_gpio_cfgpin(GPIO_I2S_DO, S3C_GPIO_SFN(GPIO_I2S_DO_AF));
+	s3c_gpio_cfgpin(GPIO_I2S_SYNC, S3C_GPIO_SFN(GPIO_I2S_SYNC_AF)); 
+	s3c_gpio_cfgpin(GPIO_I2S_SCLK, S3C_GPIO_SFN(GPIO_I2S_SCLK_AF)); 
+	s3c_gpio_cfgpin(GPIO_I2S_SDI, S3C_GPIO_SFN(GPIO_I2S_SDI_AF));   
+	s3c_gpio_cfgpin(GPIO_I2S_SDO, S3C_GPIO_SFN(GPIO_I2S_SDO_AF));
 
     /* pull-up-enable, pull-down-disable*/
-	s3c_gpio_setpull(GPIO_I2S_CLK, S3C_GPIO_PULL_UP); 
-	s3c_gpio_setpull(GPIO_I2S_LRCLK, S3C_GPIO_PULL_UP); 
-	s3c_gpio_setpull(GPIO_I2S_DI, S3C_GPIO_PULL_UP); 
-	s3c_gpio_setpull(GPIO_I2S_DO, S3C_GPIO_PULL_UP); 
+	s3c_gpio_setpull(GPIO_I2S_SCLK, S3C_GPIO_PULL_UP); 
+	s3c_gpio_setpull(GPIO_I2S_SYNC, S3C_GPIO_PULL_UP); 
+	s3c_gpio_setpull(GPIO_I2S_SDI, S3C_GPIO_PULL_UP); 
+	s3c_gpio_setpull(GPIO_I2S_SDO, S3C_GPIO_PULL_UP); 
 
 	if (s3c_i2s.regs == NULL)
 		return -ENXIO;
@@ -722,7 +726,6 @@ static int s3c_i2s_probe(struct platform_device *pdev,
 
 	s3c_snd_txctrl(0);
 	s3c_snd_rxctrl(0);
-
 
 	return 0;
 
@@ -804,18 +807,23 @@ struct dmac_conn_info dmac_i2s0_info = {
 };
 #endif
 
+//extern struct platform_device s3c_device_iis;
 static struct snd_soc_dai_ops s3c_dai_ops = {
-		.hw_params = s3c_i2s_hw_params,
-		.prepare   = s3c_i2s_prepare,
-		.startup   = s3c_i2s_startup,
-		.trigger   = s3c_i2s_trigger,
-		.set_fmt = s3c_i2s_set_fmt,
-		.set_clkdiv = s3c_i2s_set_clkdiv,
-		.set_sysclk = s3c_i2s_set_sysclk,
+	.hw_params = s3c_i2s_hw_params,
+	.prepare   = s3c_i2s_prepare,
+	.startup   = s3c_i2s_startup,
+	.trigger   = s3c_i2s_trigger,
+	.set_fmt = s3c_i2s_set_fmt,
+	.set_clkdiv = s3c_i2s_set_clkdiv,
+	.set_sysclk = s3c_i2s_set_sysclk,
 };
+
+
+
 
 struct snd_soc_dai s3c_i2s_dai = {
 	.name = "s3c-i2s",
+//	.dev = s3c_device_iis,
 	.id = 0,
 	.probe = s3c_i2s_probe,
 	.suspend = s3c_i2s_suspend,

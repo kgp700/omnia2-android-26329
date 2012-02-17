@@ -9,9 +9,11 @@
 #include <mach/map.h>
 #include <plat/regs-clock.h>
 
+#define CONFIG_CIQ_CRASH_CATCHER //etinum.ciq crash catcher
 
 #define UPLOAD_DRAM_BASE 0x50000000
-#define UPLOAD_DRAM_SIZE 0xD000000
+//bss #define UPLOAD_DRAM_SIZE 0xD000000
+#define UPLOAD_DRAM_SIZE 0x8000000
 #define UPLOAD_INFO_SIZE 0x1000
 #define UPLOAD_INFO_VIRT_ADDR p_upload_info
 #define UPLOAD_INFO_PHYS_ADDR (UPLOAD_DRAM_BASE+UPLOAD_DRAM_SIZE-0x1000-UPLOAD_INFO_SIZE) //-0x1000 is for sec_log_buf
@@ -129,6 +131,43 @@ typedef enum
 	BLK_UART_MSG_FOR_FACTRST_2ND_ACK = 0x88888888,
 }kernel_sec_upload_cause_type;
 
+#ifdef CONFIG_CIQ_CRASH_CATCHER
+#include <linux/sched.h>
+// Crash Info (Tasks info, Registers and MMU info backup for CIQ)
+#define CRASH_CATCHER_START_OFFSET 0x200
+#define UPLOAD_CRASH_CATCHER_INFO_ADDR (UPLOAD_INFO_VIRT_ADDR+CRASH_CATCHER_START_OFFSET)
+
+#define CC_STACK_SZ 0x100
+
+typedef struct {
+	struct task_struct task;
+	u32 stack[CC_STACK_SZ];
+} t_task_info;
+
+//size of this structure must 0xA00 or less
+typedef struct {
+	u32 magic1;
+	u32 magic2;
+	u64 timestamp;
+	t_kernel_sec_mmu_info mmuinfo;
+	t_kernel_sec_arm_core_regsiters regs;
+	t_task_info taskinfo;
+} t_crash_catcher_info;
+#endif
+
+#define CONFIG_FORCED_PANIC
+#ifdef CONFIG_FORCED_PANIC
+#define FORCED_PANIC_ST_OFFSET 0xC00
+#define FORCED_PANIC_ST_ADDR (UPLOAD_INFO_VIRT_ADDR+FORCED_PANIC_ST_OFFSET)
+
+// sizeof this structure must be 0x200 or less
+struct forced_panic_info{
+	u32 magic1;
+	u32 magic2;
+	char msg[0x200-8];
+};
+
+#endif
 
 extern void __iomem * kernel_sec_viraddr_wdt_reset_reg;
 extern void kernel_sec_map_wdog_reg(void);

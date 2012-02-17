@@ -44,6 +44,19 @@ config VIDEO_SAMSUNG_S5K4CA
 	depends on VIDEO_SAMSUNG
 	help
 	  TBA
+	  
+config VIDEO_SAMSUNG_S5K5CA
+	tristate "S5K5CA (3.0M CIS module, 2048x1536)"
+	depends on VIDEO_SAMSUNG
+	help
+	  TBA
+
+config VIDEO_SAMSUNG_S5KA3D
+	tristate "S5KA3D (TBD)"
+	depends on VIDEO_SAMSUNG
+	help
+	  TBA
+
 
 config VIDEO_SAMSUNG_PO4010
 	tristate "PO4010N (0.1M CIS module, 352x288)"
@@ -56,3 +69,11 @@ config VIDEO_SAMSUNG_AIT848
 	depends on VIDEO_SAMSUNG
 	help
 	  TBA
+
+
+config FLASH_AAT1271A
+	boolean "AAT1271A camera flash"
+	depends on VIDEO_SAMSUNG
+	help
+	  TBA
+

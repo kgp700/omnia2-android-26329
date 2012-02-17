@@ -19,8 +19,7 @@
 #include <linux/platform_device.h>
 
 /* KR3DM I2C Address */
-#define	SENS_ADD            0x38
-//#define	SENS_ADD            0x10
+#define	SENS_ADD            0x10
 #define DEBUG               0
 #define I2C_M_WR            0x00
 #define I2C_DF_NOTIFY       0x01

@@ -266,7 +266,7 @@ static int s3c_i2s_v40_hw_params(struct snd_pcm_substream *substream,
 	
 	s3cdbg("Entered %s\n", __FUNCTION__);
 
-#if defined(CONFIG_MACH_INSTINCTQ) || defined(CONFIG_MACH_INFOBOWLQ)
+#ifdef CONFIG_MACH_INSTINCTQ
 	s3c64xx_i2s.master = 1;
 #else
 	s3c64xx_i2s.master = 0;

@@ -1,4 +1,4 @@
-#include <mach/infobowlq.h>
+#include <mach/instinctq.h>
 #include "kr3dm_i2c.h"
 
 #define I2C_READ_FAIL_PROTECTION
@@ -21,9 +21,9 @@ static int i2c_acc_kr3dm_detect(struct i2c_client *, int kind, struct i2c_board_
 
 static unsigned short ignore[] = {I2C_CLIENT_END };
 static unsigned short normal_addr[] = {I2C_CLIENT_END };
-static unsigned short probe_addr[] = { 0, SENS_ADD, I2C_CLIENT_END };
-//static unsigned short probe_addr[] = { 0, SENS_ADD >> 1, I2C_CLIENT_END };
+static unsigned short probe_addr[] = { 6, SENS_ADD >> 1, I2C_CLIENT_END };
 
+static bool is_kr3dm_sleep=false;
 
 static struct i2c_client_address_data addr_data = {
 	.normal_i2c		= normal_addr,
@@ -77,11 +77,8 @@ char i2c_acc_kr3dm_read(u8 reg, u8 *val, unsigned int len )
 	struct 	 i2c_msg msg[1];
 	unsigned char data[1];
 
-	if( (g_client == NULL) || (g_client->adapter==NULL) )
+	if( (g_client == NULL) || (!g_client->adapter) )
 	{
-#ifdef DEBUG
-	printk("[KR3DM] i2c_acc_kr3dm_read >>>>>>>>>>>>>>>>>>>>>>>error1<<<<<<<<<<<<<<<<<<\n");
-#endif
 		return -ENODEV;
 	}
 
@@ -93,7 +90,6 @@ char i2c_acc_kr3dm_read(u8 reg, u8 *val, unsigned int len )
 
 	err = i2c_transfer(g_client->adapter, msg, 1);
 
-
 	if (err >= 0)
 	{
 		msg->flags = I2C_M_RD;
@@ -104,19 +100,11 @@ char i2c_acc_kr3dm_read(u8 reg, u8 *val, unsigned int len )
 
 	if (err >= 0)
 	{
-#ifdef DEBUG
-	    //printk("[KR3DM] %s %d >>>>>>>>>>>>>>>>>>>>>>>error2(%d)<<<<<<<<<<<<<<<<<<\n", __func__, __LINE__, err);
-#endif
 		return 0;
 	}
 #if DEBUG
 	printk(KERN_ERR "%s %d i2c transfer error\n", __func__, __LINE__);
 #endif
-#ifdef DEBUG
-	if(msg->len >3)
-	    printk("[KR3DM] i2c_acc_kr3dm_read  %x %x %x %x len %d \n", msg->buf[0] , msg->buf[1], msg->buf[2], msg->buf[3],msg->len );
-#endif
-
 	return err;;
 
 }
@@ -184,9 +172,7 @@ static int __devexit i2c_acc_kr3dm_remove(struct i2c_client *client)
 int i2c_acc_kr3dm_init(void)
 {
 	int ret;
-#ifdef DEBUG
-	printk("[KR3DM] ********** i2c_acc_kr3dm_init =====================\n");
-#endif
+
 	if ( (ret = i2c_add_driver(&acc_kr3dm_i2c_driver)) )
 	{
 		printk(KERN_ERR "Driver registration failed, module not inserted.\n");
@@ -212,9 +198,7 @@ int kr3dm_set_range(char range)
 {
    int comres = 0;
    unsigned char data;
-#ifdef DEBUG
-	printk("[KR3DM] ********** kr3dm_set_range =====================\n");
-#endif
+
    if (p_kr3dm==0)
 	    return E_KR3DM_NULL_PTR;
 
@@ -241,15 +225,9 @@ int kr3dm_set_mode(unsigned char mode)
 	{
 		case KR3DM_MODE_NORMAL:
 		case KR3DM_MODE_WAKE_UP:
-#ifdef DEBUG
-			printk("[KR3DM]=====================KR3DM_MODE_WAKE_UP =====================\n");
-#endif			
 			comres += p_kr3dm->KR3DM_BUS_WRITE_FUNC(p_kr3dm->dev_addr, CTRL_REG1, &normal, 1);
 			break;
 		case KR3DM_MODE_SLEEP:
-#ifdef DEBUG
-			printk("[KR3DM]=====================KR3DM_MODE_SLEEP =====================\n");
-#endif
 			comres += p_kr3dm->KR3DM_BUS_WRITE_FUNC(p_kr3dm->dev_addr, CTRL_REG1, &sleep, 1);
 			break;
 		default:
@@ -324,11 +302,6 @@ int kr3dm_release (struct inode *inode, struct file *filp)
 
 int kr3dm_ioctl(struct inode *inode, struct file *filp, unsigned int cmd,  unsigned long arg)
 {
-	
-#ifdef DEBUG
-			//printk("[KR3DM]<<<<<<kr3dm_ioctl %d %d>>>>>>\n",cmd,arg);
-#endif	
-
 	int err = 0;
 	unsigned char data[3];
 	kr3dmacc_t accels;
@@ -337,12 +310,12 @@ int kr3dm_ioctl(struct inode *inode, struct file *filp, unsigned int cmd,  unsig
 	/* check cmd */
 	if(_IOC_TYPE(cmd) != KR3DM_IOC_MAGIC)
 	{
-		printk("[KR3DM] cmd magic type error\n");
+		printk("cmd magic type error\n");
 		return -ENOTTY;
 	}
 	if(_IOC_NR(cmd) > KR3DM_IOC_MAXNR)
 	{
-		printk("[KR3DM] cmd number error\n");
+		printk("cmd number error\n");
 		return -ENOTTY;
 	}
 
@@ -352,7 +325,7 @@ int kr3dm_ioctl(struct inode *inode, struct file *filp, unsigned int cmd,  unsig
 		err = !access_ok(VERIFY_READ, (void __user*)arg, _IOC_SIZE(cmd));
 	if(err)
 	{
-		printk("[KR3DM] cmd access_ok error\n");
+		printk("cmd access_ok error\n");
 		return -EFAULT;
 	}
 
@@ -362,7 +335,7 @@ int kr3dm_ioctl(struct inode *inode, struct file *filp, unsigned int cmd,  unsig
 			err = kr3dm_read_accel_xyz(&accels);
 			if(copy_to_user((kr3dmacc_t*)arg, &accels, sizeof(kr3dmacc_t))!=0)
 			{
-				printk("[KR3DM] copy_to error\n");
+				printk("copy_to error\n");
 				return -EFAULT;
 			}
 			return err;
@@ -449,11 +422,11 @@ int kr3dm_read_accel_xyz(kr3dmacc_t * acc)
 	data[0] = (~data[0] + 1);
 	data[1] = (~data[1] + 1);
 	data[2] = (~data[2] + 1);
-	    if(data[0] & 0x80)
-		    acc->x = (0x100-data[0])*(-1);
-    else
-		    acc->x = ((data[0]) & 0xFF);
- 
+
+    	if(data[0] & 0x80)
+    		acc->x = (0x100-data[0]);
+    	else
+    		acc->x = ((data[0]) & 0xFF)*(-1);
     	if(data[1]& 0x80)
     		acc->y = (0x100-data[1]);
     	else
@@ -462,8 +435,9 @@ int kr3dm_read_accel_xyz(kr3dmacc_t * acc)
     		acc->z = (0x100-data[2]);
     	else
     		acc->z = ((data[2]) & 0xFF)*(-1);
+
 #if DEBUG
-	//printk("[KR3DM] ==> read-xyz2 : x = %d  /  y =  %d  /  z = %d\n", acc->x, acc->y, acc->z);
+	printk("[KR3DM] x = %d  /  y =  %d  /  z = %d converted data \n", acc->x, acc->y, acc->z ); 
 #endif
 	return comres;
 }
@@ -471,25 +445,21 @@ int kr3dm_read_accel_xyz(kr3dmacc_t * acc)
 #ifdef CONFIG_HAS_EARLYSUSPEND
 static void kr3dm_early_suspend(struct early_suspend *handler)
 {
-#ifdef DEBUG
-	printk("[KR3DM] ==> kr3dm_early_suspend\n");
-#endif
+	is_kr3dm_sleep=true;
 	kr3dm_set_mode( KR3DM_MODE_SLEEP );
 }
 
 static void kr3dm_late_resume(struct early_suspend *handler)
 {
-#ifdef DEBUG
-	printk("[KR3DM] ==> kr3dm_late_resume\n");
-#endif
 	kr3dm_set_mode( KR3DM_MODE_NORMAL );
+	msleep(3);
+	is_kr3dm_sleep=false;
 }
 #endif /* CONFIG_HAS_EARLYSUSPEND */
 
 
 void kr3dm_chip_init(void)
 {
-
 	kr3dm.kr3dm_bus_write = i2c_acc_kr3dm_write;
 	kr3dm.kr3dm_bus_read  = i2c_acc_kr3dm_read;
 
@@ -504,12 +474,9 @@ void kr3dm_chip_init(void)
 
 int kr3dm_init(kr3dm_t *kr3dm)
 {
-
 	unsigned char val1 = 0x27;
 	unsigned char val2 = 0x00;
-#ifdef DEBUG
-	printk("[KR3DM] ********** kr3dm_init =====================\n");
-#endif
+
 	p_kr3dm = kr3dm;
 	p_kr3dm->dev_addr = SENS_ADD;										/* preset KR3DM I2C_addr */
 	p_kr3dm->KR3DM_BUS_WRITE_FUNC(p_kr3dm->dev_addr, CTRL_REG1, &val1, 1 );
@@ -564,8 +531,6 @@ int kr3dm_acc_start(void)
 	kr3dm_read_accel_xyz( &accels );
 	printk("[KR3DM] x = %d  /  y =  %d  /  z = %d\n", accels.x, accels.y, accels.z );
 	printk("[KR3DM] ======================kr3dm_acc_start Ready for use !!!!! =============\n");
-#else
-	kr3dm_read_accel_xyz( &accels );
 #endif
 	return 0;
 }
@@ -596,10 +561,6 @@ void kr3dm_acc_end(void)
 
 static int kr3dm_accelerometer_probe( struct platform_device* pdev )
 {
-
-	#ifdef DEBUG
-	printk("[KR3DM] ********** kr3dm_accelerometer_probe =====================\n");
-#endif
 	return kr3dm_acc_start();
 
 }

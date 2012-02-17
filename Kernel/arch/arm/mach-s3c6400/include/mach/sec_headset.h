@@ -15,8 +15,6 @@
 #ifndef __ASM_ARCH_SEC_HEADSET_H
 #define __ASM_ARCH_SEC_HEADSET_H
 
-#define FEATURE_SUPPORT_NEW_SENDEND  //HYH_20100512
-
 enum {
 	SEC_HEADSET_NO_DEVICE		= 0,
 	SEC_HEADSET_NORMAL_HEADSET	= 1,
@@ -35,9 +33,9 @@ struct sec_headset_port
 {
 	struct sec_gpio_info	det_headset;
 	struct sec_gpio_info	send_end;
-	#ifdef FEATURE_SUPPORT_NEW_SENDEND  //HYH_20100511
-	struct sec_gpio_info	send_end_second;  //HYH_20100507
-	#endif
+#if defined(CONFIG_MACH_VINSQ) || defined(CONFIG_MACH_MAX)|| defined(CONFIG_MACH_VITAL)
+	struct sec_gpio_info	send_end_second;
+#endif
 };
 
 struct sec_headset_platform_data

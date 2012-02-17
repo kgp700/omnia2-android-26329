@@ -60,10 +60,10 @@
 unsigned long s3c_pm_flags;
 
 int (*bml_suspend_fp)(struct device *dev, u32 state, u32 level);
-EXPORT_SYMBOL(bml_suspend_fp);
+//EXPORT_SYMBOL(bml_suspend_fp);
 
 int (*bml_resume_fp)(struct device *dev, u32 level);
-EXPORT_SYMBOL(bml_resume_fp);
+//EXPORT_SYMBOL(bml_resume_fp);
 
 /* for external use */
 #define PFX "s3c64xx-pm: "
@@ -331,7 +331,7 @@ static struct sleep_save sromc_save[] = {
 	SAVE_ITEM(S3C64XX_SROM_BC4),
 	SAVE_ITEM(S3C64XX_SROM_BC5),
 };
-
+#if 0
 static struct sleep_save onenand_save[] = {
 	SAVE_ITEM(S3C_MEM_CFG0),
 	SAVE_ITEM(S3C_BURST_LEN0),
@@ -401,10 +401,11 @@ static struct sleep_save onenand_save[] = {
 	SAVE_ITEM(S3C_FLASH_AUX_CNTRL1),
 	SAVE_ITEM(S3C_FLASH_AFIFO_CNT1),
 };
+#endif
 
 #ifdef CONFIG_S3C_PM_DEBUG
 
-//extern void printascii(const char *);
+extern void printascii(const char *);
 void pm_dbg(const char *fmt, ...)
 {
 	va_list va;
@@ -414,8 +415,7 @@ void pm_dbg(const char *fmt, ...)
 	vsprintf(buff, fmt, va);
 	va_end(va);
 
-	//printascii(buff);
-	printk(buff);
+	printascii(buff);
 }
 
 
@@ -768,6 +768,10 @@ void (*pm_cpu_sleep)(void);
 */
 
 extern unsigned int extra_eint0pend = 0x0;
+extern unsigned int extra_wakeup_stat = 0x0;
+
+EXPORT_SYMBOL(extra_eint0pend);
+EXPORT_SYMBOL(extra_wakeup_stat);
 
 static int s3c6410_pm_enter(suspend_state_t state)
 {
@@ -800,17 +804,24 @@ static int s3c6410_pm_enter(suspend_state_t state)
 	s3c6410_pm_do_save(irq_save, ARRAY_SIZE(irq_save));
 	s3c6410_pm_do_save(core_save, ARRAY_SIZE(core_save));
 	s3c6410_pm_do_save(sromc_save, ARRAY_SIZE(sromc_save));
-	s3c6410_pm_do_save(onenand_save, ARRAY_SIZE(onenand_save));
+//bss	s3c6410_pm_do_save(onenand_save, ARRAY_SIZE(onenand_save));
 	s3c6410_pm_do_save(uart_save, ARRAY_SIZE(uart_save));
 
 	/* ensure INF_REG0  has the resume address */
+	__raw_writel(0xE240000C, (phys_to_virt(0x50008000)));
+	__raw_writel(0xE5901000, (phys_to_virt(0x50008004)));
+	__raw_writel(0xE1a0f001, (phys_to_virt(0x50008008)));
+	__raw_writel(0xe320f000, (phys_to_virt(0x5000800C)));
+	__raw_writel(0xe320f000, (phys_to_virt(0x50008010)));
+	__raw_writel(0xe320f000, (phys_to_virt(0x50008014)));
+
 	__raw_writel(virt_to_phys(s3c6410_cpu_resume), S3C_INFORM0);
 
 	/* set the irq configuration for wake */
 	s3c6410_pm_configure_extint();
 
 	/* call cpu specific preperation */
-
+	__raw_writel(0xF, S3C_INFORM3);
 	pm_cpu_prep();
 
 	/* flush cache back to ram */
@@ -877,7 +888,7 @@ static int s3c6410_pm_enter(suspend_state_t state)
 	s3c6410_pm_do_restore(sromc_save, ARRAY_SIZE(sromc_save));
 	s3c6410_pm_do_restore(gpio_save, ARRAY_SIZE(gpio_save));
 	s3c6410_pm_do_restore(irq_save, ARRAY_SIZE(irq_save));
-	s3c6410_pm_do_restore(onenand_save, ARRAY_SIZE(onenand_save));
+//bss	s3c6410_pm_do_restore(onenand_save, ARRAY_SIZE(onenand_save));
 	s3c6410_pm_do_restore(uart_save, ARRAY_SIZE(uart_save));
 	
 	__raw_writel(0x0, S3C64XX_SLPEN);
@@ -892,11 +903,12 @@ static int s3c6410_pm_enter(suspend_state_t state)
 	s3c6410_pm_check_restore();
 
 	extra_eint0pend = eint0pend;
+	extra_wakeup_stat = wakeup_stat;
 
 	pr_info("%s: WAKEUP_STAT(0x%08x), EINT0PEND(0x%08x)\n",
 			__func__, wakeup_stat, eint0pend);
 
-	s3c_config_wakeup_gpio();
+	s3c_config_wakeup_gpio();	
 
 	/* ok, let's return from sleep */
 	DBG("S3C6410 PM Resume (post-restore)\n");
@@ -922,8 +934,8 @@ static int s3c6410_pm_wake(suspend_state_t state)
 
 static struct platform_suspend_ops s3c6410_pm_ops = {
 	.enter		= s3c6410_pm_enter,
-	.prepare_late 	= s3c6410_pm_prepare_late,
-	.wake 		= s3c6410_pm_wake,
+	.prepare_late = s3c6410_pm_prepare_late,
+	.wake       = s3c6410_pm_wake,
 	.valid		= suspend_valid_only_mem,
 };
 

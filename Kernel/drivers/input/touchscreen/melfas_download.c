@@ -20,6 +20,13 @@
 
 #include "melfas_download.h"
 
+#define TSP_SDCARD_UPDATE //etinum.tsp.firmware_update updating using sdcard
+
+#ifdef TSP_SDCARD_UPDATE
+#include <linux/uaccess.h>
+#include <linux/vmalloc.h>
+#include <linux/fs.h>
+#endif
 
 //============================================================
 //
@@ -37,20 +44,24 @@
 //#include "MTH_SM900_R63_V13_bin.c"
 //#include "MTH_SM900_R63_V14_bin.c"
 //#include "MTH_SM900_R63_V15_bin.c"
-//#include "MTH_SM900_R63_V16_bin.c"
-//#include "MTH_SR880_R00_V00_bin.c"
-//#include "MTH_SR880_RB10_VB02_bin.c"
-//#include "MTH_SR880_RC30_VD06_bin.c"
-//#include "MTH_SR880_RC30_VD08_bin.c"
-//#include "MTH_SR880_RC30_VD14_bin.c"
-//#include "MTH_SR880_RC30_VD15_bin.c"
-//#include "MTH_SR880_RC30_VD16_bin.c"
-#include "MTH_SPICA_I5700_bin.c"
 
-extern const uint8_t MELFAS_binary[];
-extern const uint16_t MELFAS_binary_nLength;
+#if defined (CONFIG_MACH_VINSQ)
+#include "MTH_SM910_R20_V05_bin.c"
+#include "MTH_SM910_R30_VD6_bin.c"
+#include "MTH_SM910_R40_V25_bin.c" // multi touch (if updated R80, will be displayed 8F in HW)
+#include "MTH_SM910_R80_V24_bin.c" // multi touch (if updated R40, will be displayed 4F in HW)
+#include "MTH_SM910_RE0_V21_bin.c" // multi touch
+#elif defined(CONFIG_MACH_VITAL)
+#include "MTH_SM920_R40_V08_bin.c"
+#include "MTH_SM920_R61_V02_bin.c"
+#elif defined(CONFIG_MACH_MAX)
+#include "MTH_SI100_R61_V17_bin.c"
+#else
+#include "MTH_SM900_R63_V16_bin.c"
+#endif
 
-extern int mcsdl_download_binary_data(void);
+//extern const uint8_t MELFAS_binary[];
+//extern const uint16_t MELFAS_binary_nLength;
 
 //---------------------------------
 //    Downloading functions
@@ -99,6 +110,66 @@ void melfas_send_download_enable_command(void)
 
 #endif
 
+#ifdef TSP_SDCARD_UPDATE
+static int do_tsp_firmware_load(const char *fn, char **fp)
+{
+	struct file* filp;
+	long l = 0;
+	char *dp;
+	loff_t pos;
+
+	filp = filp_open(fn, 0, 0);
+	if (IS_ERR(filp))
+	{
+		printk(KERN_INFO "Unable to load '%s'.\n", fn);
+		return 0;
+	}
+	l = filp->f_path.dentry->d_inode->i_size;
+	if (l <= 0 || l > (512*1024))
+	{
+		printk(KERN_INFO "Invalid firmware '%s'\n", fn);
+		filp_close(filp, NULL);
+		return 0;
+	}
+	dp = vmalloc(l);
+	if (dp == NULL)
+	{
+		printk(KERN_INFO "Out of memory loading '%s'.\n", fn);
+		filp_close(filp, NULL);
+		return 0;
+	}
+	pos = 0;
+	if (vfs_read(filp, dp, l, &pos) != l)
+	{
+		printk(KERN_INFO "Failed to read '%s'.\n", fn);
+		vfree(dp);
+		filp_close(filp, NULL);
+		return 0;
+	}
+	filp_close(filp, NULL);
+	*fp = dp;
+	return (int) l;
+}
+
+int tsp_firmware_load(const char *fn, char **fp)
+{
+	int r;
+	mm_segment_t fs = get_fs();
+
+	set_fs(get_ds());
+	r = do_tsp_firmware_load(fn, fp);
+	set_fs(fs);
+	return r;
+}
+
+int tsp_firmware_unload(char *fp)
+{
+    if(fp)
+        vfree(fp);
+
+    return 0;
+}
+#endif
 
 //============================================================
 //
@@ -106,8 +177,8 @@ void melfas_send_download_enable_command(void)
 //
 //============================================================
 
-int mcsdl_download_binary_data(void)
-{
+int mcsdl_download_binary_data(int hw_ver) {
+
     int ret;
 
     #if MELFAS_USE_PROTOCOL_COMMAND_FOR_DOWNLOAD
@@ -125,17 +196,90 @@ int mcsdl_download_binary_data(void)
     // Run Download
     //------------------------  
 
-//    ret = mcsdl_download( (const UINT8*) MELFAS_binary, (const UINT16)MELFAS_binary_nLength );
-//    ret = mcsdl_download( MTH_SINSTINCTQ_R01_V03_bin, MTH_SINSTINCTQ_R01_V03_bin_nLength );
-//    ret = mcsdl_download( MTH_SM900_R63_V12_bin, MTH_SM900_R63_V12_bin_nLength );
-//    ret = mcsdl_download( MTH_SM900_R63_V13_bin, MTH_SM900_R63_V13_bin_nLength );
-//    ret = mcsdl_download( MTH_SM900_R63_V14_bin, MTH_SM900_R63_V14_bin_nLength );
-//    ret = mcsdl_download( MTH_SM900_R63_V15_bin, MTH_SM900_R63_V15_bin_nLength );
-    ret = mcsdl_download( MELFAS_binary, MELFAS_binary_nLength );
+    uint8_t* pfirmware = NULL;
+    size_t firmware_size = 0;
+    uint8_t fromsdcard = false;
+#ifdef TSP_SDCARD_UPDATE
+	firmware_size=tsp_firmware_load("/sdcard/ts/firmware/_ts_firmware_.bin", &pfirmware);
 
+    if(firmware_size > 32000 && firmware_size < 64000) {
+        printk("[TSP] firmware loaded from sdcard (%d)\n",firmware_size);
+        printk("[TSP] %02x %02x %02x %02x \n", 
+            pfirmware[0], pfirmware[1], pfirmware[2], pfirmware[3]);
+        printk("[TSP] %02x %02x %02x %02x \n", 
+            pfirmware[4], pfirmware[5], pfirmware[6], pfirmware[7]);
+        fromsdcard = true;
+    }
+    else
+#endif
+    {
+#if defined (CONFIG_MACH_VINSQ)
+		if(hw_ver == 0xE0) {
+            pfirmware = MELFAS_RE0_binary;
+            firmware_size = MELFAS_RE0_binary_nLength;
+		}
+		else if(hw_ver == 0x80 || hw_ver == 0xA0 || hw_ver == 0xB0 || hw_ver == 0xC0) {
+            pfirmware = MELFAS_R80_binary;
+            firmware_size = MELFAS_R80_binary_nLength;
+		}
+		else if(hw_ver == 0x40 || hw_ver == 0x50) {
+            pfirmware = MELFAS_R40_binary;
+            firmware_size = MELFAS_R40_binary_nLength;
+		}
+		else {
+			pfirmware = NULL;
+			firmware_size = 0;
+			ret = -1;
+		}
+#elif defined(CONFIG_MACH_VITAL)
+		if(hw_ver == 0x40) {
+            pfirmware = MELFAS_R40_binary;
+            firmware_size = MELFAS_R40_binary_nLength;
+		}
+		else if(hw_ver == 0x61) {
+            pfirmware = MELFAS_R61_binary;
+            firmware_size = MELFAS_R61_binary_nLength;
+		}
+		else if(hw_ver == -1) {
+			// SET ME WITH THE LATEST HW REV FIRMWARE!!!!!!!!
+            pfirmware = MELFAS_R40_binary;
+            firmware_size = MELFAS_R40_binary_nLength;
+		}
+		else {
+			pfirmware = NULL;
+			firmware_size = 0;
+			ret = -1;
+		}
+
+#elif defined(CONFIG_MACH_MAX)        
+        pfirmware = MTH_SI100_R61_V17_bin;
+        firmware_size = MTH_SI100_R61_V17_bin_nLength;
+#else
+        pfirmware = MTH_SM900_R63_V16_bin;
+        firmware_size = MTH_SM900_R63_V16_bin_nLength;
+#endif
+    }
+	if(pfirmware == NULL)
+		printk(KERN_WARNING "[TSP] No firmware is available for R%X\n", hw_ver);
+	else
+		printk(KERN_WARNING "[TSP] R%X firmware is selected\n", hw_ver);
+
+    if(firmware_size >= 0 && pfirmware != NULL) {
+        printk("#######################################\n");
+        printk("[Melfas TSP] Firmware Download START\n");
+        printk("system rev is %x\n", system_rev);
+
+        ret = mcsdl_download( pfirmware, firmware_size );
+        
+        if(fromsdcard)
+            tsp_firmware_unload(pfirmware);
+        
+        printk("[Melfas TSP] Firmware Download END\n");
+        printk("#######################################\n");
+    }
+    
     MELFAS_ROLLBACK_BASEBAND_ISR();                    // Roll-back Baseband touch interrupt ISR.
     MELFAS_ROLLBACK_WATCHDOG_TIMER_RESET();            // Roll-back Baseband watchdog timer
-
     #if MELFAS_ENABLE_DBG_PRINT
 
         mcsdl_print_result( ret );            // Show result
@@ -145,119 +289,6 @@ int mcsdl_download_binary_data(void)
 
     return ( ret == MCSDL_RET_SUCCESS );
 }
-
-
-#if 0
-int mcsdl_download_binary_file(char *fileName)
-{
-    int ret;
-
-    UINT8  *pData = NULL;
-    UINT16 nBinary_length =0;
-
-
-    //==================================================
-    //
-    //    Porting section 7. File process
-    //
-    //    1. Read '.bin file'
-    //  2. When make binary buffer, make Size 'EVEN'.
-    //     Add 0xFF on last if binary size is odd.
-    //    3. Run mcsdl_download_binary_data();
-    //
-    //==================================================
-
-    #if 1
-
-        // TO DO : File Process & Get file Size(== Binary size)
-        //            This is just a simple sample
-
-        FILE *fp;
-        INT  nRead;
-
-        //------------------------------
-        // Open a file
-        //------------------------------
-
-        if( fopen( fp, fileName, "rb" ) == NULL ){
-            return MCSDL_RET_FILE_ACCESS_FAILED;
-        }
-
-        //------------------------------
-        // Get Binary Size
-        //------------------------------
-
-        fseek( fp, 0, SEEK_END );
-
-        nBinary_length = (UINT16)ftell(fp);
-
-        //------------------------------
-        // Memory allocation
-        //------------------------------
-
-        pData = (UINT8*)malloc( (INT)nBinary_length + (nBinary_length%2) );
-
-        if( pData == NULL ){
-
-            return MCSDL_RET_FILE_ACCESS_FAILED;
-        }
-
-        //------------------------------
-        // Read binary file
-        //------------------------------
-
-        fseek( fp, 0, SEEK_SET );
-
-        nRead = fread( pData, 1, (INT)nBinary_length, fp );        // Read binary file
-
-        if( nRead != (INT)nBinary_length ){
-
-            fclose(fp);                                                // Close file
-
-            if( pData != NULL )                                        // free memory alloced.
-                free(pData);
-
-            return MCSDL_RET_FILE_ACCESS_FAILED;
-        }
-
-        //------------------------------
-        // Close file
-        //------------------------------
-
-        fclose(fp);
-
-    #endif
-
-    if( pData != NULL && nBinary_length > 0 && nBinary_length < 62*1024 ){
-
-        MELFAS_DISABLE_BASEBAND_ISR();                    // Disable Baseband touch interrupt ISR.
-        MELFAS_DISABLE_WATCHDOG_TIMER_RESET();            // Disable Baseband watchdog timer
-
-        ret = mcsdl_download( (const UINT8 *)pData, (const UINT16)nBinary_length );
-
-        MELFAS_ROLLBACK_BASEBAND_ISR();                    // Roll-back Baseband touch interrupt ISR.
-        MELFAS_ROLLBACK_WATCHDOG_TIMER_RESET();            // Roll-back Baseband watchdog timer
-
-    }else{
-
-        ret = MCSDL_RET_WRONG_PARAMETER;
-    }
-
-    #if MELFAS_ENABLE_DBG_PRINT
-
-    mcsdl_print_result( ret );
-
-    #endif
-
-    #if 0
-        if( pData != NULL )                                        // free memory alloced.
-            free(pData);
-    #endif
-
-    return ( ret == MCSDL_RET_SUCCESS );
-
-}
-#endif
 
 //------------------------------------------------------------------
 //
@@ -1283,4 +1314,3 @@ void mcsdl_delay_test(INT32 nCount)
 
 
 #endif
-

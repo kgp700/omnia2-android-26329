@@ -320,6 +320,11 @@ static ssize_t s3c_bat_store(struct device *dev,
 	return ret;
 }
 
+void s3c_bat_set_compensation_for_drv(int mode, int offset)
+{
+}
+EXPORT_SYMBOL(s3c_bat_set_compensation_for_drv);
+
 static enum power_supply_property s3c_battery_properties[] = {
 	POWER_SUPPLY_PROP_STATUS,
 	POWER_SUPPLY_PROP_HEALTH,
@@ -364,6 +369,9 @@ static struct power_supply s3c_power_supplies[] = {
 	},
 };
 
+// S.LSI ss1.yang, w/o fsa9480 switch
+
+#if 0
 static int s3c_cable_status_update(int status)
 {
 	int ret = 0;
@@ -415,6 +423,14 @@ static int s3c_cable_status_update(int status)
 	dev_dbg(dev, "%s : call power_supply_changed\n", __func__);
 	return ret;
 }
+#else
+extern void s3c_udc_power_up(void);
+static int s3c_cable_status_update(int status)
+{
+	dev_info(dev, "[USB] %s temp workaround : Force s3c_udc_power_up()\n", __func__);
+	s3c_udc_power_up();
+}
+#endif
 
 static void s3c_bat_status_update(struct power_supply *bat_ps)
 {
@@ -519,6 +535,11 @@ static int __devinit s3c_bat_probe(struct platform_device *pdev)
 
 	s3c_bat_status_update(
 			&s3c_power_supplies[CHARGER_BATTERY]);
+
+		
+	// S.LSI ss1.yang, w/o fsa9480 switch
+	dev_info(dev, "[USB] %s temp workaround : Force s3c_udc_power_up()\n", __func__);
+	s3c_udc_power_up();
 
 __end__:
 	return ret;

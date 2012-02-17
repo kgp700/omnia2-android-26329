@@ -230,11 +230,13 @@ static int get_product_id(struct android_dev *dev)
 	return dev->product_id;
 }
 
+extern void get_usb_serial(char *usb_serial_number);
 static int __init android_bind(struct usb_composite_dev *cdev)
 {
 	struct android_dev *dev = _android_dev;
 	struct usb_gadget	*gadget = cdev->gadget;
 	int			gcnum, id, product_id, ret;
+	char usb_serial_number[13] = {0,};
 
 	printk(KERN_INFO "android_bind\n");
 
@@ -256,7 +258,13 @@ static int __init android_bind(struct usb_composite_dev *cdev)
 	id = usb_string_id(cdev);
 	if (id < 0)
 		return id;
+	get_usb_serial(usb_serial_number);
 	strings_dev[STRING_SERIAL_IDX].id = id;
+	if( (usb_serial_number[0] +
+		 usb_serial_number[1] +
+		 usb_serial_number[2]) != 0 )
+	strcpy((char *)(strings_dev[STRING_SERIAL_IDX].s), usb_serial_number);
+	printk("[ADB_UMS] string_dev = %s \n",strings_dev[STRING_SERIAL_IDX].s);
 	device_desc.iSerialNumber = id;
 
 	if (gadget->ops->wakeup)

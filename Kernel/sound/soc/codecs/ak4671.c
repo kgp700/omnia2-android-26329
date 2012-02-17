@@ -38,6 +38,8 @@
 #define AUDIO_NAME "ak4671"
 #define AK4671_VERSION "0.2"
 
+#define AUDIO_SPECIFIC_DEBUG    0
+#if AUDIO_SPECIFIC_DEBUG
 #define SUBJECT "ak4671.c"
 #define P(format,...)\
 	printk ("[ "SUBJECT " (%s,%d) ] " format "\n", __func__, __LINE__, ## __VA_ARGS__);
@@ -45,6 +47,11 @@
 	printk ("[ "SUBJECT " (%s,%d) ] " "%s - IN" "\n", __func__, __LINE__, __func__);
 #define FO \
 	printk ("[ "SUBJECT " (%s,%d) ] " "%s - OUT" "\n", __func__, __LINE__, __func__);
+#else
+#define P(format,...)
+#define FI 
+#define FO 
+#endif
 
 #define DIGITAL_FILTER_CONTROL		0
 
@@ -567,7 +574,7 @@ static const struct snd_kcontrol_new ak4671_snd_controls[] = {
 		ak4671_get_mic_path, ak4671_set_mic_path),
 
 	/* MIC Gain */
-	SOC_DOUBLE("MIC Gain", 							AK4671_MIC_GAIN, 0, 4, 0xf, 0),
+	SOC_DOUBLE("MIC Gain", AK4671_MIC_GAIN, 0, 4, 0xf, 0),
 
 	SOC_ENUM_EXT("FM Radio Path", path_control_enum[3],
 		ak4671_get_path, ak4671_set_path),
@@ -752,7 +759,7 @@ static int ak4671_set_dai_fmt(struct snd_soc_dai *codec_dai,
 
 static int ak4671_mute(struct snd_soc_dai *dai, int mute)
 {
-#if 0
+#if 1
 	P("mute %d", mute);
 	struct snd_soc_codec *codec = dai->codec;
 
@@ -832,15 +839,6 @@ static int ak4671_suspend(struct platform_device *pdev, pm_message_t state)
 		/* AUDIO_EN & MAX8906_AMP_EN Disable */
 		amp_enable(0); /* Board Specific function */
 		audio_power(0); /* Board Specific function */
-#if defined (CONFIG_MACH_MAX)
-//		if(!(gpio_get_value(GPIO_DET_35) ^ 1 && gpio_get_value(GPIO_MONOHEAD_DET_ISR) ^ 0))
-//		if(!(gpio_get_value(GPIO_DET_35) ^ 1))
-        		mic_enable(0);
-//		else if((GPIO_MONOHEAD_DET_ISR) ^ 0)
-//        		mic_enable(0);		
-#else		
-		    mic_enable(0); /* MICBIAS Disable (SPH-M900 Only) */
-#endif	
 		ak4671_power = 0;
 		ak4671_idle_mode = IDLE_POWER_DOWN_MODE_ON;
 	}
@@ -860,8 +858,6 @@ static int ak4671_resume(struct platform_device *pdev)
 		ak4671_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
 		ak4671_set_bias_level(codec, codec->suspend_bias_level);
 	}
-
-	mic_enable(1); /* MICBIAS Enable (SPH-M900 Only) */
 
 	return 0;
 }
@@ -894,7 +890,7 @@ static int ak4671_init(struct snd_soc_device *socdev)
 
     init_tty_mode_procfs();
     init_loopback_mode_procfs();
-
+    
 	if (codec->reg_cache == NULL)
 		return -ENOMEM;
 
@@ -1114,8 +1110,6 @@ static int ak4671_i2c_probe(struct i2c_client *client,
 	struct snd_soc_codec *codec = socdev->card->codec;
 	int ret;
 
-	printk("%s called\n", __func__);
-
 	ak4671_client = client;
 	i2c_set_clientdata(client, ak4671_client);
 	codec->control_data = client;
@@ -1151,7 +1145,6 @@ err:
 
 static int ak4671_i2c_remove(struct i2c_client *client)
 {
-	printk("%s called\n", __func__);
 	ak4671_client = i2c_get_clientdata(client);
 	kfree(ak4671_client);
 
@@ -1244,7 +1237,6 @@ static int ak4671_remove(struct platform_device *pdev)
 	struct snd_soc_device *socdev = platform_get_drvdata(pdev);
 	struct snd_soc_codec *codec = socdev->card->codec;
 
-	printk("%s called\n", __func__);
 	if (codec->control_data)
 		ak4671_set_bias_level(codec, SND_SOC_BIAS_OFF);
 
@@ -1285,7 +1277,6 @@ static int __init ak4671_codec_init(void)
 	return snd_soc_register_dai(&ak4671_dai);	
 }
 module_init(ak4671_codec_init);
-//late_initcall(ak4671_codec_init);
 
 static void __exit ak4671_codec_exit(void)
 {

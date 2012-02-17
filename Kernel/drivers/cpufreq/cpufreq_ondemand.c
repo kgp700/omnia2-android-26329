@@ -626,15 +626,6 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 
 	this_dbs_info = &per_cpu(od_cpu_dbs_info, cpu);
 
-#ifdef CONFIG_CPU_S3C6410
-	if(!kondemand_wq){
-		kondemand_wq = create_workqueue("kondemand");
-        	if (!kondemand_wq) {
-                	printk(KERN_ERR "Creation of kondemand failed\n");
-                	return -EFAULT;
-        	}
-	}
-#endif /* CONFIG_CPU_S3C6410 */
 	switch (event) {
 	case CPUFREQ_GOV_START:
 		if ((!cpu_online(cpu)) || (!policy->cur))

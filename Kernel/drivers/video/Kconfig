@@ -273,10 +273,16 @@ config FB_S3C_S6D05A0
 	bool "S6D05A0"
 	---help---
 	TBA
+
 config FB_S3C_AMS320FS01
 	bool "AMS320FS01"
 	---help---
 	TBA
+
+config FB_S3C_AMS369FG
+	bool "AMS369FG"
+	---help---
+	Display driver for OMNIA II. 
 
 endchoice
 
@@ -329,14 +335,6 @@ config FB_S3C_VIRTUAL_SCREEN
 
 config FB_S3C_DOUBLE_BUFFERING
 	bool "Enable Double Buffering"
-	depends on FB_S3C_BPP
-
-	default n
-	---help---
-	TBA
-
-config FB_S3C_SHOW_LOGO
-	bool "Show full screen logo with progress bar"
 	depends on FB_S3C_BPP
 
 	default n

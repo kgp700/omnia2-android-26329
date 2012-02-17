@@ -128,7 +128,7 @@
 //    Functions
 //----------------------------------------------------
 
-int mcsdl_download_binary_data(void);            // with binary type .c   file.
+int mcsdl_download_binary_data(int hw_ver);            // with binary type .c   file.
 int mcsdl_download_binary_file(char *fileName);            // with binary type .bin file.
 
 #if MELFAS_ENABLE_DELAY_TEST                    // For initial porting test.

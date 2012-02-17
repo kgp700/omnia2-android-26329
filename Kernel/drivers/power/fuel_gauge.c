@@ -2,7 +2,11 @@
 //.m [VinsQ][PINEONE][Start] MAX17043 Fuel Gauge    Pineone hgwoo    2010.01.11
 #if defined(__FUEL_GAUGES_IC_MAX17043__)
 #define MAX17043_SLAVE_ADDR	0x6D
-#define I2C_CHANNEL 4
+#if defined(CONFIG_MACH_VITAL)
+#define I2C_CHANNEL 5
+#else
+#define I2C_CHANNEL 5
+#endif
 #else
 #define MAX17040_SLAVE_ADDR	0x6D
 #endif
@@ -20,6 +24,10 @@
 #define CMD0_REG			0xFE
 #define CMD1_REG			0xFF
 
+#ifdef __FUEL_GAUGES_IC_MAX17043_SLEEP_ALERT__
+#define ALERT_THRESHOLD_VALUE 0x1E //1%
+//#define ALERT_THRESHOLD_VALUE 0x1E //5%
+#endif
 /* Definitions */
 #define VCELL_ARR_SIZE			6
 
@@ -170,6 +178,34 @@ unsigned int fg_read_vcell(void)
 	return (vcell_total - vcell_max - vcell_min) / (VCELL_ARR_SIZE - 2);
 }
 
+#if defined(CONFIG_MACH_VINSQ) || defined(CONFIG_MACH_VITAL)
+#if defined(__FUEL_GAUGES_IC__) || defined(__FUEL_GAUGES_IC_MAX17043__)
+unsigned int fg_read_soc_decimal_point(void)
+{
+	struct i2c_client *client = fg_i2c_client;
+	u8 data[1];
+
+	
+//	pr_info("%s\n", __func__);
+	if (fg_i2c_read(client, SOC1_REG, &data[0]) < 0) {
+		pr_err("%s: Failed to read SOC1\n", __func__);
+		return -1;
+	}
+	//printk("%s: Decimal Point SOC [0]=%d\n", __func__, data[0]);
+    data[0] = ((data[0]*100)/255);
+	if(data[0] >=100)
+		data[0]=99;
+	//printk("%s: Recalc. Decimal Point SOC [0]=%d\n", __func__, data[0]);	
+	if (is_reset_soc) {
+		pr_info("%s: Reseting SOC\n", __func__);
+		return -1;
+	} else {
+		return data[0];
+	}
+}
+#endif
+#endif
+
 unsigned int fg_read_soc(void)
 {
 	struct i2c_client *client = fg_i2c_client;
@@ -186,11 +222,8 @@ unsigned int fg_read_soc(void)
 		return -1;
 	}
 	pr_debug("%s: SOC [0]=%d [1]=%d\n", __func__, data[0], data[1]);
-#ifdef log_block
-	printk("%s: is_reset_soc : %d\n", __func__, is_reset_soc);
-#endif
+
 	if (is_reset_soc) {
-		printk("%s: is_reset_soc : %d\n", __func__, is_reset_soc);
 		pr_info("%s: Reseting SOC\n", __func__);
 		return -1;
 	} else {
@@ -212,33 +245,91 @@ unsigned int fg_read_soc(void)
 unsigned int fg_rcomp_init(void)
 {
 	struct i2c_client *client = fg_i2c_client;
+#ifdef __FUEL_GAUGES_IC_MAX17043_SLEEP_ALERT__
 	u8 rcomp_data[2];
+#else
+	u8 rcomp_data[1];
+#endif
 
 	s32 ret = 0;
 
 
 //	pr_info("%s\n", __func__);
-#if 1
-	rcomp_data[0] = 0xB0;
-	rcomp_data[1] = 0x1F;
-#endif	
-#if 0			// default rcomp data	971C
-	rcomp_data[0] = 0x97;
-	rcomp_data[1] = 0x1C;
-#endif	
+	rcomp_data[0] = 0xA7;
+#ifdef __FUEL_GAUGES_IC_MAX17043_SLEEP_ALERT__
+	rcomp_data[1] = ALERT_THRESHOLD_VALUE;	// 10%	Threshold
+#else
+	rcomp_data[1] = 0x1E;	// 10%	Threshold
+#endif
 	ret = fg_i2c_write(client, RCOMP0_REG, rcomp_data);
 
 	printk("%s, rcomp_data[0] : 0x%02x\n",__func__, rcomp_data[0]);
+#ifdef __FUEL_GAUGES_IC_MAX17043_SLEEP_ALERT__
+	printk("%s, rcomp_data[1] : 0x%02x\n",__func__, rcomp_data[1]);
+#endif
 	if (ret)
 		pr_err("%s: failed rcomp_data(%d)\n", __func__, ret);
 
 	msleep(500);
-#if 0
-	orig_temp = s3c_bat_temp_read();
-	printk("orig_temp : %d\n", orig_temp);
-#endif
 	return ret;
 }
+
+#ifdef __FUEL_GAUGES_IC_MAX17043_SLEEP_ALERT__
+unsigned int fg_set_alertlevel_cal(void)
+{
+	struct i2c_client *client = fg_i2c_client;
+
+	u8 rcomp_data[2];
+	s32 ret = 0;
+
+//	pr_info("%s\n", __func__);	
+	rcomp_data[0] = 0xA7;
+
+	rcomp_data[1] = 0x1E;	// 10%	Threshold
+
+	ret = fg_i2c_write(client, RCOMP0_REG, rcomp_data);
+
+	msleep(500);
+	return ret;
+}
+#endif
+
+#ifdef __FUEL_GAUGES_IC_MAX17043_SLEEP_ALERT__
+unsigned int fg_alert_int_clear(void)		// added by kimjh
+{
+	struct i2c_client *client = fg_i2c_client;
+#ifdef __FUEL_GAUGES_IC_MAX17043_SLEEP_ALERT__
+	u8 rcomp_data[2];
+#else
+	u8 rcomp_data[1];
+#endif
+	u8 data[1];
+
+	s32 ret = 0;
+
+//	pr_info("%s\n", __func__);
+	rcomp_data[0] = 0xA7;
+#ifdef __FUEL_GAUGES_IC_MAX17043_SLEEP_ALERT__
+	rcomp_data[1] = ALERT_THRESHOLD_VALUE;
+#endif
+
+	printk("%s: Now Clear Interrupt Bit Rcomp Register ===> 0Dh\n", __FUNCTION__);
+	ret = fg_i2c_write(client, RCOMP0_REG, rcomp_data);
+	msleep(500);
+
+#ifdef _DEBUG_
+	if (fg_i2c_read(client, RCOMP1_REG, &data[0]) < 0) {
+		pr_err("%s: Failed to read rcomp1\n", __func__);
+		return -1;
+	}
+	data[0] = ((data[0] >> 5) & 0x1);
+#endif
+	if (ret)
+		printk("%s: Failed rcomp_Interrupt Clear Bit (%d)\n", __func__, ret);
+
+	return ret;
+}
+#endif
 #if 0		// commnet by kimjh
 unsigned int fg_rcomp_low_temp(int rcomp_temp)		// added by kimjh
 {
@@ -280,10 +371,34 @@ unsigned int fg_rcomp_high_temp(int rcomp_temp)		// added by kimjh
 	return ret;
 }
 #endif
+
+#ifdef __FUEL_GAUGES_IC_MAX17043_SLEEP_ALERT__
+unsigned int Is_Interrupt(void)
+{
+
+	u8 data[1];
+	struct i2c_client *client = fg_i2c_client;	
+
+//	pr_info("%s\n", __func__);
+	if (fg_i2c_read(client, RCOMP1_REG, &data[0]) < 0) {
+		pr_err("%s: Failed to read rcomp1\n", __func__);
+		return -1;
+	}
+	data[0] = ((data[0] >> 5) & 0x1);
+	if(data[0] == 1)
+		printk("interrupt accured ============= > OK\n");
+	//else	printk("None Interrupt =============== > Another Interrupt...\n");
+	return data[0];
+}
+#endif
+
 unsigned int fg_reset_soc(void)
 {
+	int soc;
+
 	struct i2c_client *client = fg_i2c_client;
 	u8 rst_cmd[2];
+
 	s32 ret = 0;
 
 //	pr_info("%s\n", __func__);
@@ -296,14 +411,16 @@ unsigned int fg_reset_soc(void)
 	if (ret)
 		pr_err("%s: failed reset SOC(%d)\n", __func__, ret);
 	
-//	printk("%s, line : %d\n",__FUNCTION__,__LINE__);
+	printk("%s, line : %d\n",__FUNCTION__,__LINE__);
 
 	msleep(500);
 	is_reset_soc = 0;
- 	s3c_bat_soc_read();		// added by kimjh
-#if 1//def log_open
-	printk("%s, line : %d\n",__FUNCTION__,__LINE__);
+#if 0
+	soc = fg_read_soc();
+	s3c_bat_soc_read("/sys/class/power_supply/battery/fg_soc", (char*)&soc);	// added by kimjh
 #endif
+	s3c_bat_soc_read();
+	printk("%s, line : %d\n",__FUNCTION__,__LINE__);
 	return ret;
 }
 

@@ -78,10 +78,24 @@
 #include "f_mass_storage.h"
 #include "gadget_chips.h"
 
+#ifdef CONFIG_MACH_MAX
+#include "fsa9480_i2c.h"
+#endif 
+
 
 #define BULK_BUFFER_SIZE           4096
 
 /*-------------------------------------------------------------------------*/
+#ifdef CONFIG_MACH_MAX
+/* SCSI device types */
+#define TYPE_DISK		0x00
+#define TYPE_CDROM	0x05
+
+/* MODEM USB_SEL Pin control */
+/* 1 : PDA, 2 : MODEM */
+#define SWITCH_PDA		1
+#define SWITCH_MODEM		2
+#endif 
 
 #define DRIVER_NAME		"usb_mass_storage"
 #define MAX_LUNS		8
@@ -137,6 +151,10 @@ static const char shortname[] = DRIVER_NAME;
 
 
 /*-------------------------------------------------------------------------*/
+#ifdef CONFIG_MACH_MAX
+extern void usb_switch_mode(int sel);
+extern int UmsCDEnable;
+#endif 
 
 /* Bulk-only data structures */
 
@@ -189,6 +207,12 @@ struct bulk_cs_wrap {
 #define SC_READ_12			0xa8
 #define SC_READ_CAPACITY		0x25
 #define SC_READ_FORMAT_CAPACITIES	0x23
+
+#ifdef CONFIG_MACH_MAX
+#define SC_READ_HEADER			0x44
+#define SC_READ_TOC			0x43
+#endif 
+
 #define SC_RELEASE			0x17
 #define SC_REQUEST_SENSE		0x03
 #define SC_RESERVE			0x16
@@ -238,6 +262,11 @@ struct lun {
 	u32		sense_data_info;
 	u32		unit_attention_data;
 
+	#ifdef CONFIG_MACH_MAX
+    	int     cdrom;
+    	int     id;
+	#endif 
+
 	struct device	dev;
 };
 
@@ -250,6 +279,10 @@ static struct lun *dev_to_lun(struct device *dev)
 
 /* Big enough to hold our biggest descriptor */
 #define EP0_BUFSIZE	256
+
+#ifdef CONFIG_MACH_MAX
+#define DELAYED_STATUS	(EP0_BUFSIZE + 999)	/* An impossibly large value */
+#endif 
 
 /* Number of buffers we will use.  2 is enough for double-buffering */
 #define NUM_BUFFERS	2
@@ -326,10 +359,15 @@ struct fsg_dev {
 	unsigned int		short_packet_received : 1;
 	unsigned int		bad_lun_okay : 1;
 
+	#ifdef CONFIG_MACH_MAX
+	unsigned int		disable_raised : 1;
+	#endif 
+
 	unsigned long		atomic_bitflags;
-#define REGISTERED		0
-#define CLEAR_BULK_HALTS	1
-#define SUSPENDED		2
+
+	#define REGISTERED		0
+	#define CLEAR_BULK_HALTS	1
+	#define SUSPENDED		2
 
 	struct usb_ep		*bulk_in;
 	struct usb_ep		*bulk_out;
@@ -362,8 +400,12 @@ struct fsg_dev {
 	int				release;
 
 	struct switch_dev sdev;
-
 	struct wake_lock wake_lock;
+
+	#ifdef CONFIG_MACH_MAX
+    	int		cdrom;
+	#endif 
+
 };
 
 static inline struct fsg_dev *func_to_dev(struct usb_function *f)
@@ -665,6 +707,11 @@ static int fsg_function_setup(struct usb_function *f,
 {
 	struct fsg_dev	*fsg = func_to_dev(f);
 	struct usb_composite_dev *cdev = fsg->cdev;
+
+	#ifdef CONFIG_MACH_MAX
+	struct usb_request	*req = cdev->req;
+	#endif 
+
 	int			value = -EOPNOTSUPP;
 	u16			w_index = le16_to_cpu(ctrl->wIndex);
 	u16			w_value = le16_to_cpu(ctrl->wValue);
@@ -695,6 +742,11 @@ static int fsg_function_setup(struct usb_function *f,
 			 * and reinitialize our state. */
 			raise_exception(fsg, FSG_STATE_RESET);
 			value = 0;
+
+			#ifdef CONFIG_MACH_MAX
+			value = DELAYED_STATUS;
+			#endif 
+
 			break;
 
 		case USB_BULK_GET_MAX_LUN_REQUEST:
@@ -722,6 +774,23 @@ static int fsg_function_setup(struct usb_function *f,
 		}
 	}
 		
+	#ifdef CONFIG_MACH_MAX
+	if (value >= 0 && value != DELAYED_STATUS) {
+		DBG(fsg, "ums req%02x.%02x v%04x i%04x l%d\n",
+			ctrl->bRequestType, ctrl->bRequest,
+			w_value, w_index, w_length);
+			int rc;
+			cdev->req->zero = 0;
+			cdev->req->length = value;
+			rc = usb_ep_queue(cdev->gadget->ep0, cdev->req, GFP_ATOMIC);
+			if (rc < 0)
+				printk("%s setup response queue error\n", __func__);
+		}
+
+	/* device either stalls (value < 0) or reports success */
+	return value;
+
+	#else
 		/* respond with data transfer or status phase? */
 		if (value >= 0) {
 			int rc;
@@ -731,7 +800,12 @@ static int fsg_function_setup(struct usb_function *f,
 			if (rc < 0)
 				printk("%s setup response queue error\n", __func__);
 		}
+	#endif 
+	
 
+	#ifdef CONFIG_MACH_MAX
+
+	#else
 	if (value == -EOPNOTSUPP)
 		VDBG(fsg,
 			"unknown class-specific control req "
@@ -739,6 +813,7 @@ static int fsg_function_setup(struct usb_function *f,
 			ctrl->bRequestType, ctrl->bRequest,
 			le16_to_cpu(ctrl->wValue), w_index, w_length);
 	return value;
+	#endif 
 }
 
 /*-------------------------------------------------------------------------*/
@@ -1271,6 +1346,9 @@ static int do_verify(struct fsg_dev *fsg)
 
 
 /*-------------------------------------------------------------------------*/
+#ifdef CONFIG_MACH_MAX
+static int open_backing_file(struct fsg_dev *fsg, struct lun *curlun, const char *filename);
+#endif 
 
 static int do_inquiry(struct fsg_dev *fsg, struct fsg_buffhd *bh)
 {
@@ -1288,12 +1366,17 @@ static int do_inquiry(struct fsg_dev *fsg, struct fsg_buffhd *bh)
 
 	memset(buf, 0, 8);	/* Non-removable, direct-access device */
 
+	#ifdef CONFIG_MACH_MAX
+	buf[0] = TYPE_DISK;
+	#endif 
+	
 	buf[1] = 0x80;	/* set removable bit */
 	buf[2] = 2;		/* ANSI SCSI level 2 */
 	buf[3] = 2;		/* SCSI-2 INQUIRY data format */
 	buf[4] = 31;		/* Additional length */
 				/* No special options */
 //by ss1
+
 #if 0
 	sprintf(buf + 8, "%-8s%-16s%04x", fsg->vendor,
 			fsg->product, fsg->release);
@@ -1302,9 +1385,116 @@ static int do_inquiry(struct fsg_dev *fsg, struct fsg_buffhd *bh)
 			product_id, fsg->release);
 
 #endif
+
+
 	return 36;
 }
 
+#ifdef CONFIG_MACH_MAX
+static int do_inquiry_cdrom(struct fsg_dev *fsg, struct fsg_buffhd *bh)
+{
+	u8	*buf = (u8 *) bh->buf;
+
+	static char vendor_id[] = "SAMSUNG ";
+	static char product_id[]= "CD-ROM          ";
+	static char release[]   = "0.01";
+	static char vendor_str[]= "MOBILE CDROM        ";
+
+	if (!fsg->curlun) {		// Unsupported LUNs are okay
+		fsg->bad_lun_okay = 1;
+		memset(buf, 0, 36);
+		buf[0] = 0x7f;		// Unsupported, no device-type
+		return 36;
+	}
+
+	memset(buf, 0, 8);	// Non-removable, direct-access device
+
+	buf[0] = TYPE_CDROM;
+	buf[1] = 0x80;
+	buf[2] = 2;		// ANSI SCSI level 2
+	buf[3] = 2;		// SCSI-2 INQUIRY data format
+	buf[4] = 0x33;		// Additional length
+	buf[5] = 0;
+	buf[6] = 0;
+	buf[7] = 0x10;
+
+	//sprintf(buf + 8, "%-8s%-16s%-4s", vendor_id, product_id, release);
+	sprintf(buf + 8, "%-8s%-16s%-4s%-20s", vendor_id, product_id, release, vendor_str);
+
+    //XXXXX - open the cdrom iso file
+    open_backing_file(fsg, fsg->curlun, "/system/etc/verizon_I100.iso");
+    
+	return 36+20;
+}
+
+static void store_cdrom_address(u8 *dest, int msf, u32 addr)
+{
+	if (msf) {
+		/* Convert to Minutes-Seconds-Frames */
+		addr >>= 2;		/* Convert to 2048-byte frames */
+		addr += 2*75;		/* Lead-in occupies 2 seconds */
+		dest[3] = addr % 75;	/* Frames */
+		addr /= 75;
+		dest[2] = addr % 60;	/* Seconds */
+		addr /= 60;
+		dest[1] = addr;		/* Minutes */
+		dest[0] = 0;		/* Reserved */
+	} else {
+		/* Absolute sector */
+		put_be32(dest, addr);
+	}
+}
+
+static int do_read_header(struct fsg_dev *fsg, struct fsg_buffhd *bh)
+{
+	struct lun	*curlun = fsg->curlun;
+	int		msf = fsg->cmnd[1] & 0x02;
+	u32		lba = get_be32(&fsg->cmnd[2]);
+	u8		*buf = (u8 *) bh->buf;
+
+	if ((fsg->cmnd[1] & ~0x02) != 0) {		/* Mask away MSF */
+		curlun->sense_data = SS_INVALID_FIELD_IN_CDB;
+		return -EINVAL;
+	}
+	if (lba >= curlun->num_sectors) {
+		curlun->sense_data = SS_LOGICAL_BLOCK_ADDRESS_OUT_OF_RANGE;
+		return -EINVAL;
+	}
+
+	memset(buf, 0, 8);
+	buf[0] = 0x01;		/* 2048 bytes of user data, rest is EC */
+	store_cdrom_address(&buf[4], msf, lba);
+	return 8;
+}
+
+
+static int do_read_toc(struct fsg_dev *fsg, struct fsg_buffhd *bh)
+{
+	struct lun	*curlun = fsg->curlun;
+	int		msf = fsg->cmnd[1] & 0x02;
+	int		start_track = fsg->cmnd[6];
+	u8		*buf = (u8 *) bh->buf;
+
+	if ((fsg->cmnd[1] & ~0x02) != 0 ||		/* Mask away MSF */
+			start_track > 1) {
+		curlun->sense_data = SS_INVALID_FIELD_IN_CDB;
+		return -EINVAL;
+	}
+
+	memset(buf, 0, 20);
+	buf[1] = (20-2);		/* TOC data length */
+	buf[2] = 1;			/* First track number */
+	buf[3] = 1;			/* Last track number */
+	buf[5] = 0x16;			/* Data track, copying allowed */
+	buf[6] = 0x01;			/* Only track is number 1 */
+	store_cdrom_address(&buf[8], msf, 0);
+
+	buf[13] = 0x16;			/* Lead-out track is data */
+	buf[14] = 0xAA;			/* Lead-out track number */
+	store_cdrom_address(&buf[16], msf, curlun->num_sectors);
+	return 20;
+}
+#endif 
 
 static int do_request_sense(struct fsg_dev *fsg, struct fsg_buffhd *bh)
 {
@@ -1468,18 +1658,34 @@ static int do_start_stop(struct fsg_dev *fsg)
 	struct lun	*curlun = fsg->curlun;
 	int		loej, start;
 
+   	#ifdef CONFIG_MACH_MAX
+    	printk(":::do_start_stop\n");
+    	LDBG(curlun, "do_start_stop\n");
+    	#endif 
+
 	/* int immed = fsg->cmnd[1] & 0x01; */
 	loej = fsg->cmnd[4] & 0x02;
-	start = fsg->cmnd[4] & 0x01;
 
-	if (loej) {
+	start = fsg->cmnd[4] & 0x01;
+   	#ifdef CONFIG_MACH_MAX
+    	LDBG(curlun, "do_start_stop eject cmd %d start %d\n",loej,start);
+   	#endif 
+
+	if (loej){
 		/* eject request from the host */
 		if (backing_file_is_open(curlun)) {
 			close_backing_file(fsg, curlun);
 			curlun->unit_attention_data = SS_MEDIUM_NOT_PRESENT;
-		}
-	}
 
+			#ifdef CONFIG_MACH_MAX
+			if (UmsCDEnable){
+				UmsCDEnable = 0;
+				usb_switch_mode(SWITCH_MODEM);
+				}
+			#endif //eunsuk 
+			}
+		}
+	
 	return 0;
 }
 
@@ -1857,6 +2063,10 @@ static int do_scsi_command(struct fsg_dev *fsg)
 	int			i;
 	static char		unknown[16];
 
+	#ifdef CONFIG_MACH_MAX
+    	struct lun		*curlun = fsg->curlun;
+	#endif 
+
 	dump_cdb(fsg);
 
 	/* Wait for the next buffer to become available for data or status */
@@ -1877,6 +2087,11 @@ static int do_scsi_command(struct fsg_dev *fsg)
 		if ((reply = check_command(fsg, 6, DATA_DIR_TO_HOST,
 				(1<<4), 0,
 				"INQUIRY")) == 0)
+	#ifdef CONFIG_MACH_MAX
+		if( UmsCDEnable )
+                		reply = do_inquiry_cdrom(fsg, bh);
+            	else
+	#endif 
 			reply = do_inquiry(fsg, bh);
 		break;
 
@@ -1952,6 +2167,26 @@ static int do_scsi_command(struct fsg_dev *fsg)
 				"READ CAPACITY")) == 0)
 			reply = do_read_capacity(fsg, bh);
 		break;
+
+	#ifdef CONFIG_MACH_MAX
+	case SC_READ_HEADER:
+		//if (!curlun->id) goto unknown_cmnd;
+		fsg->data_size_from_cmnd = get_be16(&fsg->cmnd[7]);
+		if ((reply = check_command(fsg, 10, DATA_DIR_TO_HOST,
+				(3<<7) | (0x1f<<1), 1,
+				"READ HEADER")) == 0)
+			reply = do_read_header(fsg, bh);
+		break;
+
+	case SC_READ_TOC:
+		//if (!curlun->id)	goto unknown_cmnd;
+		fsg->data_size_from_cmnd = get_be16(&fsg->cmnd[7]);
+		if ((reply = check_command(fsg, 10, DATA_DIR_TO_HOST,
+				(7<<6) | (1<<1), 1,
+				"READ TOC")) == 0)
+			reply = do_read_toc(fsg, bh);
+		break;
+	#endif 
 
 	case SC_READ_FORMAT_CAPACITIES:
 		fsg->data_size_from_cmnd = get_be16(&fsg->cmnd[7]);
@@ -2038,6 +2273,11 @@ static int do_scsi_command(struct fsg_dev *fsg)
 		/* Fall through */
 
 	default:
+
+	#ifdef CONFIG_MACH_MAX
+	unknown_cmnd:
+	#endif 
+
 		fsg->data_size_from_cmnd = 0;
 		sprintf(unknown, "Unknown x%02x", fsg->cmnd[0]);
 		if ((reply = check_command(fsg, fsg->cmnd_size,
@@ -2048,9 +2288,17 @@ static int do_scsi_command(struct fsg_dev *fsg)
 		break;
 	}
 	up_read(&fsg->filesem);
+    /*DBG(fsg,*/
 
-	VDBG(fsg, "reply: %d, fsg->data_size_from_cmnd: %d\n",
-			reply, fsg->data_size_from_cmnd);
+      #ifdef CONFIG_MACH_MAX
+	if (fsg->curlun) 
+	    LDBG(fsg->curlun, "reply: %d, fsg->data_size_from_cmnd: %d\n",reply, fsg->data_size_from_cmnd);
+	else
+	    DBG(fsg, "reply: %d, fsg->data_size_from_cmnd: %d\n",reply, fsg->data_size_from_cmnd);
+       #else
+	    VDBG(fsg, "reply: %d, fsg->data_size_from_cmnd: %d\n",reply, fsg->data_size_from_cmnd);
+       #endif 
+
 	if (reply == -EINTR || signal_pending(current))
 		return -EINTR;
 
@@ -2610,6 +2858,10 @@ static int open_backing_file(struct fsg_dev *fsg, struct lun *curlun,
 	loff_t				size;
 	loff_t				num_sectors;
 
+	#ifdef CONFIG_MACH_MAX
+	loff_t				min_sectors;
+	#endif 
+
 	/* R/W if we can, R/O if we must */
 	ro = curlun->ro;
 	if (!ro) {
@@ -2653,11 +2905,31 @@ static int open_backing_file(struct fsg_dev *fsg, struct lun *curlun,
 		goto out;
 	}
 	num_sectors = size >> 9;	/* File size in 512-byte sectors */
+
+	#ifdef CONFIG_MACH_MAX
+	min_sectors = 1;
+	if (curlun->id) {
+		num_sectors &= ~3;	// Reduce to a multiple of 2048
+		min_sectors = 300*4;	// Smallest track is 300 frames
+		if (num_sectors >= 256*60*75*4) {
+			num_sectors = (256*60*75 - 1) * 4;
+			LINFO(curlun, "file too big: %s\n", filename);
+			LINFO(curlun, "using only first %d blocks\n",
+					(int) num_sectors);
+		}
+	}
+	if (num_sectors < min_sectors) {
+		LINFO(curlun, "file too small: %s\n", filename);
+		rc = -ETOOSMALL;
+		goto out;
+	}
+	#else
 	if (num_sectors == 0) {
 		LINFO(curlun, "file too small: %s\n", filename);
 		rc = -ETOOSMALL;
 		goto out;
 	}
+	#endif 
 
 	get_file(filp);
 	curlun->ro = ro;
@@ -2775,6 +3047,34 @@ static ssize_t store_file(struct device *dev, struct device_attribute *attr,
 
 static DEVICE_ATTR(file, 0444, show_file, store_file);
 
+#ifdef CONFIG_MACH_MAX
+static ssize_t show_cdrom(struct device *dev, struct device_attribute *attr,
+		char *buf)
+{
+	struct fsg_dev	*fsg = dev_get_drvdata(dev);
+    struct lun		*curlun = fsg->curlun;
+
+    printk(KERN_INFO "show_cdrom++ curlun->id %d curlun->cdrom %d\n",curlun->id,curlun->cdrom);
+    return sprintf(buf, "%d\n", fsg->cdrom);
+}
+
+static ssize_t store_cdrom(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	struct fsg_dev	*fsg = dev_get_drvdata(dev);
+    struct lun		*curlun = fsg->curlun;
+	int value;
+    printk(KERN_INFO "store_cdrom++ curlun->id %d\n",curlun->id);
+
+	sscanf(buf, "%d", &value);
+	curlun->cdrom = value;    
+	//fsg->cdrom = value;
+    printk(KERN_INFO "store_cdrom++ curlun->id %d curlun->cdrom %d\n",curlun->id,curlun->cdrom);
+	return count;
+}
+
+static DEVICE_ATTR(cdrom, S_IRUGO | S_IWUSR, show_cdrom, store_cdrom);
+#endif 
 /*-------------------------------------------------------------------------*/
 
 static void fsg_release(struct kref *ref)
@@ -2870,7 +3170,12 @@ fsg_function_bind(struct usb_configuration *c, struct usb_function *f)
 	char			*pathbuf, *p;
 
 	fsg->cdev = cdev;
+
+	#ifdef CONFIG_MACH_MAX
+	DBG(fsg, "fsg_function_bind cdrom\n");
+	#else
 	DBG(fsg, "fsg_function_bind\n");
+	#endif 
 
 	dev_attr_file.attr.mode = 0644;
 
@@ -2895,18 +3200,21 @@ fsg_function_bind(struct usb_configuration *c, struct usb_function *f)
 
 	for (i = 0; i < fsg->nluns; ++i) {
 		curlun = &fsg->luns[i];
+
+	#ifdef CONFIG_MACH_MAX
+		curlun->id = i;
+		curlun->ro = curlun->id&0x1;
+	#else
 		curlun->ro = 0;
+	#endif 
 		curlun->dev.release = lun_release;
 		/* use "usb_mass_storage" platform device as parent if available */
-		/*
 		if (fsg->pdev)
 			curlun->dev.parent = &fsg->pdev->dev;
 		else
 			curlun->dev.parent = &cdev->gadget->dev;
-		*/
-		curlun->dev.parent = &cdev->gadget->dev;
 		dev_set_drvdata(&curlun->dev, fsg);
-				dev_set_name(&curlun->dev,"lun%d", i);
+		dev_set_name(&curlun->dev,"lun%d", i);
 
 		rc = device_register(&curlun->dev);
 		if (rc != 0) {
@@ -2914,6 +3222,16 @@ fsg_function_bind(struct usb_configuration *c, struct usb_function *f)
 			goto out;
 		}
 		rc = device_create_file(&curlun->dev, &dev_attr_file);
+
+	#ifdef CONFIG_MACH_MAX
+		if (rc != 0) {
+			ERROR(fsg, "device_create_file failed: %d\n", rc);
+			device_unregister(&curlun->dev);
+			goto out;
+		}
+		rc = device_create_file(&curlun->dev, &dev_attr_cdrom);
+	#endif 
+
 		if (rc != 0) {
 			ERROR(fsg, "device_create_file failed: %d\n", rc);
 			device_unregister(&curlun->dev);
@@ -2996,6 +3314,11 @@ fsg_function_bind(struct usb_configuration *c, struct usb_function *f)
 
 	set_bit(REGISTERED, &fsg->atomic_bitflags);
 
+#ifdef CONFIG_MACH_MAX
+    DBG(fsg,"CDROM patch enabled\n");//Merge solutions Alan Stern and Mike Loockwood by d.moskvitin
+    DBG(fsg,"fsg->cdrom %d\n",fsg->cdrom);
+#endif 
+
 	/* Tell the thread to start working */
 	wake_up_process(fsg->thread_task);
 	return 0;
@@ -3030,6 +3353,12 @@ static void fsg_function_disable(struct usb_function *f)
 	if (fsg->new_config)
 		do_set_interface(fsg, -1);
 	fsg->new_config = 0;
+
+	#ifdef CONFIG_MACH_MAX
+	/* for not missing disable handling */
+	fsg->disable_raised = 1;
+	#endif 
+
 	raise_exception(fsg, FSG_STATE_CONFIG_CHANGE);
 }
 

@@ -20,6 +20,11 @@ obj-$(CONFIG_MOUSE_VSXXXAA)		+= vsxxxaa.o
 obj-$(CONFIG_MOUSE_GPIO)		+= gpio_mouse.o
 obj-$(CONFIG_MOUSE_OPTJOY)		+= opt_joy.o
 
+#etinum.LJ.firmware_update
+obj-$(CONFIG_MOUSE_OPTJOY)		+= firmware_update.o \
+															issp_driver_routines.o \
+															issp_routines.o
+															
 psmouse-objs := psmouse-base.o synaptics.o
 
 psmouse-$(CONFIG_MOUSE_PS2_ALPS)	+= alps.o

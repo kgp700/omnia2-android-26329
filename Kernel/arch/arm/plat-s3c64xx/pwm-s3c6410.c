@@ -84,6 +84,30 @@ static int s3c6410_pwm_start (int channel)
 	return 0;
 }
 
+int s3c6410_pwm_stop (int channel)
+{
+	unsigned long tcon;
+	tcon = __raw_readl(S3C_TCON);
+	switch(channel)
+	{
+	case 0:
+		tcon &= ~S3C_TCON_T0START;
+	break;
+	case 1:
+		tcon &= ~S3C_TCON_T1START;
+	break;
+	case 2:
+		tcon &= ~S3C_TCON_T2START;
+	break;
+	case 3:
+		tcon &= ~S3C_TCON_T3START;
+	break;
+
+	}
+	__raw_writel(tcon, S3C_TCON);
+
+	return 0;
+}
 
 int s3c6410_timer_setup (int channel, int usec, unsigned long g_tcnt, unsigned long g_tcmp)
 {
@@ -202,6 +226,7 @@ int s3c6410_timer_setup (int channel, int usec, unsigned long g_tcnt, unsigned l
 }
 
 EXPORT_SYMBOL(s3c6410_timer_setup);
+EXPORT_SYMBOL(s3c6410_pwm_stop);
 
 static irqreturn_t s3c6410_pwm_irq(int irq, void *devpw)
 {

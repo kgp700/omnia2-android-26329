@@ -13,6 +13,6 @@ obj-$(CONFIG_ACCEL_KR3DM)	+= kr3dm_i2c.o
 
 
 obj-$(CONFIG_ACCEL_BMA020)	+= bma020_i2c.o \
-				   bma020_acc.o \
-				   bma020.o 
+                               bma020.o \
+	                           bma020_acc.o
 

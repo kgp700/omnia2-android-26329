@@ -51,7 +51,7 @@ struct struct_frame_buf_mark {
 	u32 frames;
 };
 
-struct struct_marks_ver_mark {
+struct struct_mark_ver_mark {
 
 	u32 special_mark_1;
 
@@ -64,6 +64,17 @@ struct struct_marks_ver_mark {
 	u32 log_mark_version;
 
 	u32 framebuffer_mark_version;
+
+	void *this; /* 2개의 메모리를 구별하기 위해서 사용됩니다.*/
+
+      u32 first_size; /* first memory block의 size */
+
+      u32 first_start_addr; /* first memory block의 Physical address */
+
+      u32 second_size; /* second memory block의 size */
+
+      u32 second_start_addr; /* second memory block의 Physical address */
+
 };
 
 

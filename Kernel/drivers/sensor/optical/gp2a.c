@@ -61,9 +61,7 @@ static bool light_init_check = false;
 static int light_init_check_count = 0;
 
 static int light_init_period = 4;
-// MBjdpark 2010.11.12 : For fast sensing in Intensity Test merged from VinsQ Froyo [[
 static int In_Factry_test = 0;
-// ]]
 static ktime_t timeA,timeB,timeSub;
 
 static unsigned short opt_normal_i2c[] = {(GP2A_ADDR>>1),I2C_CLIENT_END};
@@ -131,6 +129,7 @@ EXPORT_SYMBOL(gp2a_get_proximity_value);
  *                The more value is increased, the more circumstance is dark. 
  *                 
  */
+static int lightsensor_adc;
 
 static void gp2a_work_func_light(struct work_struct *work)
 {
@@ -163,7 +162,9 @@ static void gp2a_work_func_light(struct work_struct *work)
 
 
 	/* read adc data from s3c64xx */
-		adc = s3c_adc_get_adc_data(6);
+	adc = s3c_adc_get_adc_data(6);
+
+    lightsensor_adc = adc;
 
 	gprintk("adc = %d \n",adc);
 	gprintk("cur_state = %d\n",cur_state);
@@ -242,7 +243,6 @@ static void gp2a_work_func_light(struct work_struct *work)
 		}
 		//backlight control is handled by PowerManagementService, duplicated control should be disabled. 
 		//backlight_level_ctrl(light_state[cur_state].brightness);
-		backlight_level_ctrl(light_state[cur_state].brightness); // mjw 20101105 because autobrightness
 	}
 	
 		
@@ -269,7 +269,6 @@ static enum hrtimer_restart gp2a_timer_func(struct hrtimer *timer)
 				
 	
 	queue_work(gp2a_wq, &gp2a->work_light);
-// MBjdpark 2010.11.12 : For fast sensing in Intensity Test merged from VinsQ Froyo [[
 	if(In_Factry_test ==1)
 		{
 	      hrtimer_start(&gp2a->timer,ktime_set(0,500000000),HRTIMER_MODE_REL);
@@ -278,8 +277,7 @@ static enum hrtimer_restart gp2a_timer_func(struct hrtimer *timer)
 		{
 		  hrtimer_start(&gp2a->timer,ktime_set(light_init_period/2,0),HRTIMER_MODE_REL);
 		}
-//		  hrtimer_start(&gp2a->timer,ktime_set(light_init_period/2,0),HRTIMER_MODE_REL);
-// ]]
+	
 	return HRTIMER_NORESTART;
 }
 
@@ -537,11 +535,11 @@ static void gp2a_chip_init(void)
 
 	
 	/* check HW revision */
-		printk("[OPT_sensor]This HW is rev04 or later \n");
-		light_state[0].adc_bottom_limit = ADC_CUT_HIGH_M900_R4 - ADC_CUT_GAP_M900_R4/2;
-		light_state[1].adc_bottom_limit = ADC_CUT_LOW_M900_R4  - ADC_CUT_GAP_M900_R4/2;
-		light_state[1].adc_top_limit = ADC_CUT_HIGH_M900_R4    + ADC_CUT_GAP_M900_R4/2;
-		light_state[2].adc_top_limit = ADC_CUT_LOW_M900_R4  + ADC_CUT_GAP_M900_R4/2;
+	printk("[OPT_sensor]This HW is rev04 or later \n");
+	light_state[0].adc_bottom_limit = ADC_CUT_HIGH_M900_R4 - ADC_CUT_GAP_M900_R4/2;
+	light_state[1].adc_bottom_limit = ADC_CUT_LOW_M900_R4  - ADC_CUT_GAP_M900_R4/2;
+	light_state[1].adc_top_limit = ADC_CUT_HIGH_M900_R4    + ADC_CUT_GAP_M900_R4/2;
+	light_state[2].adc_top_limit = ADC_CUT_LOW_M900_R4  + ADC_CUT_GAP_M900_R4/2;
 }
 
 
@@ -573,7 +571,7 @@ static void gp2a_on(struct gp2a_data *gp2a, int type)
 		opt_i2c_write((u8)(REGS_OPMOD),&value);
 
 		gprintk("enable irq for proximity\n");
-		enable_irq(gp2a ->irq);
+		enable_irq(gp2a->irq);
 
 		value = 0x00;
 		opt_i2c_write((u8)(REGS_CON),&value);
@@ -585,7 +583,6 @@ static void gp2a_on(struct gp2a_data *gp2a, int type)
 	{
 		light_enable = ON;
 		printk(KERN_INFO "[LIGHT_SENSOR] timer start for light sensor\n");
-// MBjdpark 2010.11.12 : For fast sensing in Intensity Test merged from VinsQ Froyo [[
 		if(In_Factry_test ==1)
 		{
 	      hrtimer_start(&gp2a->timer,ktime_set(0,500000000),HRTIMER_MODE_REL);
@@ -594,10 +591,8 @@ static void gp2a_on(struct gp2a_data *gp2a, int type)
 		{
 		  hrtimer_start(&gp2a->timer,ktime_set(light_init_period/2,0),HRTIMER_MODE_REL);
 		}
-//		  hrtimer_start(&gp2a->timer,ktime_set(light_init_period/2,0),HRTIMER_MODE_REL);
-// ]]
-		}
 	}
+}
 
 /*****************************************************************************************
  *  
@@ -687,9 +682,7 @@ static ssize_t lightsensor_file_cmd_store(struct device *dev,
 		light_init_period = 4;
 		gp2a_on(gp2a,LIGHT);
 		value = ON;
-// MBjdpark 2010.11.12 : For fast sensing in Intensity Test merged from VinsQ Froyo [[
 		In_Factry_test =0;
-// ]]
 	}
 	else if(value==0 && light_enable ==ON) 
 	{
@@ -717,16 +710,30 @@ static ssize_t lightsensor_file_cmd_store(struct device *dev,
 		light_init_period = 2;
 		gp2a_on(gp2a,LIGHT);
 		value = 7;
-// MBjdpark 2010.11.12 : For fast sensing in Intensity Test merged from VinsQ Froyo [[
 		In_Factry_test =1;
-// ]]
 	}
 
 	return size;
 }
 
+static ssize_t lightsensor_file_adc_show(struct device *dev,
+        struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf,"%u\n",lightsensor_adc);
+}
+
+static ssize_t lightsensor_file_adc_store(struct device *dev,
+        struct device_attribute *attr, const char *buf, size_t size)
+{
+	return 0;
+}
+
+
+
 static DEVICE_ATTR(lightsensor_file_cmd,0644, lightsensor_file_cmd_show, lightsensor_file_cmd_store);
 static DEVICE_ATTR(lightsensor_file_state,0644, lightsensor_file_state_show, lightsensor_file_state_store);
+static DEVICE_ATTR(lightsensor_file_adc,0644, lightsensor_file_adc_show, lightsensor_file_adc_store);
+
 
 static int gp2a_opt_probe( struct platform_device* pdev )
 {
@@ -821,6 +828,7 @@ static int gp2a_opt_probe( struct platform_device* pdev )
 		pr_err("Failed to create class(lightsensor)!\n");
 
 	switch_cmd_dev = device_create(lightsensor_class, NULL, 0, NULL, "switch_cmd");
+
 	if (IS_ERR(switch_cmd_dev))
 		pr_err("Failed to create device(switch_cmd_dev)!\n");
 
@@ -829,6 +837,10 @@ static int gp2a_opt_probe( struct platform_device* pdev )
 
 	if (device_create_file(switch_cmd_dev, &dev_attr_lightsensor_file_state) < 0)
 		pr_err("Failed to create device file(%s)!\n", dev_attr_lightsensor_file_state.attr.name);
+
+	if (device_create_file(switch_cmd_dev, &dev_attr_lightsensor_file_adc) < 0)
+		pr_err("Failed to create device file(%s)!\n", dev_attr_lightsensor_file_adc.attr.name);
+    
 	dev_set_drvdata(switch_cmd_dev,gp2a);
 
 	/* ktime init */
@@ -953,7 +965,6 @@ static int gp2a_opt_resume( struct platform_device* pdev )
 	if(light_enable)
 	{
 		gprintk("[%s] : hrtimer_start \n",__func__);
-// MBjdpark 2010.11.12 : For fast sensing in Intensity Test merged from VinsQ Froyo [[
 		if(In_Factry_test ==1)
 		{
 	      hrtimer_start(&gp2a->timer,ktime_set(0,500000000),HRTIMER_MODE_REL);
@@ -962,9 +973,7 @@ static int gp2a_opt_resume( struct platform_device* pdev )
 		{
 		  hrtimer_start(&gp2a->timer,ktime_set(light_init_period/2,0),HRTIMER_MODE_REL);
 		}
-//		  hrtimer_start(&gp2a->timer,ktime_set(light_init_period/2,0),HRTIMER_MODE_REL);
-// ]]
-		}
+	}
 
 	return 0;
 }

@@ -58,7 +58,6 @@ static struct timed_gpio_data *aat1271_flash_data;
 #define MOVIE_MODE_CURRENT_71		4
 #define MOVIE_MODE_CURRENT_63		5
 #define MOVIE_MODE_CURRENT_56		6
-#define MOVIE_MODE_CURRENT_50       7 //hjkang_DE21
 
 #define OFFSET_CAM_FLASH   (0x1 << 9)
 
@@ -92,7 +91,7 @@ static void aat1271a_flash_write(int addr, int data)
  * T = 7.98s / uF * Ct(uF) = 7.98s / uF * 0.1uF = 0.798s 
  */
 
-void aat1271a_flash_camera_control(int ctrl)
+void aat1271a_falsh_camera_control(int ctrl)
 {
 	if (ctrl) {
 		/* Movie Mode Off */
@@ -112,38 +111,20 @@ void aat1271a_flash_camera_control(int ctrl)
 		s3c_bat_set_compensation_for_drv(0,OFFSET_CAM_FLASH);
 	}
 }	
-void aat1271a_flash_torch_camera_control(int ctrl) //hjkang_DE28
-{
-	if (ctrl) {
-		
-		/* Falsh Mode Off */
-		gpio_set_value(GPIO_CAM_FLASH_EN, GPIO_LEVEL_LOW);
-		/* Movie Mode Current Setting & On */	
-		aat1271a_flash_write(MOVIE_MODE_CURRENT, MOVIE_MODE_CURRENT_71); 
-		s3c_bat_set_compensation_for_drv(1,OFFSET_CAM_FLASH);
-	}
-	else {
-		/* Falsh Mode Off */
-		gpio_set_value(GPIO_CAM_FLASH_EN, GPIO_LEVEL_LOW);
-		/* Movie Mode Off */
-		gpio_set_value(GPIO_CAM_FLASH_SET, GPIO_LEVEL_LOW);
-		s3c_bat_set_compensation_for_drv(0,OFFSET_CAM_FLASH);		
-	}
-}	
 
 /*
  * IMOVIEMODE = IFLOUTA / 7.3 = 500mA / 7.3 = 68mA
  * 45mA / 68mA = 0.66 = 0.7 = 70 %
  */
 
-void aat1271a_flash_movie_control(int ctrl)
+void aat1271a_falsh_movie_control(int ctrl)
 {
 	if (ctrl) {
 		
 		/* Falsh Mode Off */
 		gpio_set_value(GPIO_CAM_FLASH_EN, GPIO_LEVEL_LOW);
 		/* Movie Mode Current Setting & On */	
-		aat1271a_flash_write(MOVIE_MODE_CURRENT, MOVIE_MODE_CURRENT_50); //hjkang_DE21 MOVIE_MODE_CURRENT_63
+		aat1271a_flash_write(MOVIE_MODE_CURRENT, MOVIE_MODE_CURRENT_63);
 		s3c_bat_set_compensation_for_drv(1,OFFSET_CAM_FLASH);
 	}
 	else {
@@ -184,18 +165,20 @@ static int get_time_for_flash(struct timed_output_dev *dev)
 
 static void enable_flash_from_user(struct timed_output_dev *dev,int value)
 {
-	if (value > 0)
-	{
+
+		if (value > 0) {
+		
 			if (value < 780)	/* Flash Mode */
-			aat1271a_flash_camera_control(ON);
+				aat1271a_falsh_camera_control(ON);
 			else	/* Movie Mode */
-			aat1271a_flash_movie_control(ON);
+				aat1271a_falsh_movie_control(ON);
 	}
 	else if (value == 0)
-	{
-		aat1271a_flash_camera_control(OFF);
-		aat1271a_flash_movie_control(OFF);
-	}
+		{
+			aat1271a_falsh_camera_control(OFF);
+			aat1271a_falsh_movie_control(OFF);
+		}
+		
 }
 
 
@@ -214,14 +197,14 @@ static ssize_t aat1271_flash_enable_store(
 	if (value > 0) {
 	
 		if (value < 780)	/* Flash Mode */
-			aat1271a_flash_camera_control(ON);
+			aat1271a_falsh_camera_control(ON);
 		else	/* Movie Mode */
-			aat1271a_flash_movie_control(ON);
+			aat1271a_falsh_movie_control(ON);
 }
 else if (value == 0)
 	{
-		aat1271a_flash_camera_control(OFF);
-		aat1271a_flash_movie_control(OFF);
+		aat1271a_falsh_camera_control(OFF);
+		aat1271a_falsh_movie_control(OFF);
 	}
 	
 	return size;

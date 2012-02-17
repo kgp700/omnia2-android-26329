@@ -38,12 +38,8 @@
 #define I2C_BURST_MODE //dha23 100325 카메라 기동 시간 줄이기 위해 I2C Burst mode 사용.
 // Purpose of verifying I2C operaion. must be ignored later.
 //#define LOCAL_CONFIG_S5K4CA_I2C_TEST
-//#define CONFIG_FLASH_AAT1271A //dha23 101004
 
 static struct i2c_driver s5k4ca_driver;
-
-int cam_flash_on = 0; //dha23 101004
-int locked_ae_awb = 0; //dha23 101004
 
 static void s5k4ca_sensor_gpio_init(void);
 void s5k4ca_sensor_enable(void);
@@ -54,13 +50,13 @@ static void s5k4ca_sensor_exit(void);
 
 static int s5k4ca_sensor_change_size(struct i2c_client *client, int size);
 
+#undef CONFIG_FLASH_AAT1271A
 
 #ifdef CONFIG_FLASH_AAT1271A
 	extern int aat1271a_flash_init(void);
 	extern void aat1271a_flash_exit(void);
-	extern void aat1271a_flash_camera_control(int ctrl);
-	extern void aat1271a_flash_movie_control(int ctrl);
-	extern void aat1271a_flash_torch_camera_control(int ctrl); //hjkang_DE28	
+	extern void aat1271a_falsh_camera_control(int ctrl);
+	extern void aat1271a_falsh_movie_control(int ctrl);
 #endif
 
 #ifdef CONFIG_LOAD_FILE
@@ -96,23 +92,12 @@ static camif_cis_t s5k4ca_data = {
 };
 
 /* #define S5K4CA_ID	0x78 */
-enum {
-	SCENE_MODE_BASE = -1,
-	SCENE_MODE_AUTO,
-	SCENE_MODE_PORTRAIT,
-	SCENE_MODE_LANDSCAPE,
-	SCENE_MODE_NIGHT,
-	SCENE_MODE_BEACH,
-	SCENE_MODE_SNOW,
-	SCENE_MODE_SUNSET,
-	SCENE_MODE_FIREWORKS,
-	SCENE_MODE_MAX,
-};
 
-static int previous_scene_mode = SCENE_MODE_BASE;
+static int previous_scene_mode = -1;
 static int previous_WB_mode = 0;
 static int af_mode = -1;
 static unsigned short lux_value = 0;
+int locked_ae_awb = 0; //insook0901
 
 static unsigned short AFPosition = 0x00FF; 
 static unsigned short DummyAFPosition = 0x00FE; 
@@ -182,8 +167,6 @@ static int s5k4ca_sensor_write_list(struct i2c_client *client, struct samsung_sh
 {
 	int i, ret;
 	ret = 0;
-
-	printk("s5k4ca_sensor_write_list( %s ) \n", name); 
 #ifdef CONFIG_LOAD_FILE 
 	s5k4ca_regs_table_write(name);	
 #else
@@ -338,36 +321,35 @@ static int s5k4ca_sensor_burst_write_list(struct i2c_client *client, struct sams
 
 static int s5k4ca_sensor_ae_awb_lock(struct i2c_client *client)
 {
-	s5k4ca_sensor_write(client, 0xFCFC, 0xD000);
-	s5k4ca_sensor_write(client, 0x0028, 0x7000);
-	s5k4ca_sensor_write(client, 0x002A, 0x0578);
-	s5k4ca_sensor_write(client, 0x0F12, 0x0075);
+    //s5k4ca_sensor_write_list(client,s5k4ca_ae_awb_lock,"s5k4ca_ae_awb_lock");
+    s5k4ca_sensor_write(client, 0xFCFC, 0xD000);
+    s5k4ca_sensor_write(client, 0x0028, 0x7000);
+    s5k4ca_sensor_write(client, 0x002A, 0x0578);
+    s5k4ca_sensor_write(client, 0x0F12, 0x0075);
 
-	locked_ae_awb = 1; //dha23 101004
-	return 0;
+    return 0;
 }
 
 static int s5k4ca_sensor_ae_awb_unlock(struct i2c_client *client)
 {
-	if(locked_ae_awb == 1) //dha23 101004
+
+    if(previous_WB_mode == 0 && previous_scene_mode != 4)
 	{
-		if(previous_WB_mode == 0 && previous_scene_mode != SCENE_MODE_SUNSET) //dha23 101022
-		{
-			s5k4ca_sensor_write(client, 0xFCFC, 0xD000);
-			s5k4ca_sensor_write(client, 0x0028, 0x7000);
-			s5k4ca_sensor_write(client, 0x002A, 0x0578);
-			s5k4ca_sensor_write(client, 0x0F12, 0x007F);
-		}
-		else
-		{
-			s5k4ca_sensor_write(client, 0xFCFC, 0xD000);
-			s5k4ca_sensor_write(client, 0x0028, 0x7000);
-			s5k4ca_sensor_write(client, 0x002A, 0x0578);
-			s5k4ca_sensor_write(client, 0x0F12, 0x0077);
-		}
-		
-		locked_ae_awb = 0; //dha23 101004
+        //s5k4ca_sensor_write_list(client,s5k4ca_ae_awb_unlock,"s5k4ca_ae_awb_unlock");
+        s5k4ca_sensor_write(client, 0xFCFC, 0xD000);
+        s5k4ca_sensor_write(client, 0x0028, 0x7000);
+        s5k4ca_sensor_write(client, 0x002A, 0x0578);
+        s5k4ca_sensor_write(client, 0x0F12, 0x007F);
 	}
+	else
+	{
+        //s5k4ca_sensor_write_list(client,s5k4ca_ae_mwb_unlock,"s5k4ca_ae_mwb_unlock");
+        s5k4ca_sensor_write(client, 0xFCFC, 0xD000);
+        s5k4ca_sensor_write(client, 0x0028, 0x7000);
+        s5k4ca_sensor_write(client, 0x002A, 0x0578);
+        s5k4ca_sensor_write(client, 0x0F12, 0x0077);
+    
+	}				
 	return 0;
 }
 
@@ -463,24 +445,39 @@ static int sensor_init(struct i2c_client *client)
 {
 	int ret = 0;
 
+	if (system_rev >= 0x40)
+	{
 #ifdef I2C_BURST_MODE //dha23 100325	
-	if(s5k4ca_sensor_burst_write_list(client,s5k4ca_init0_04,"s5k4ca_init0_04") < 0)
-		return -1;
+		if(s5k4ca_sensor_burst_write_list(client,s5k4ca_init0_04,"s5k4ca_init0_04") < 0)
+			return -1;
 #else
-	if(s5k4ca_sensor_write_list(client,s5k4ca_init0_04,"s5k4ca_init0_04") < 0)
-		return -1;
+		if(s5k4ca_sensor_write_list(client,s5k4ca_init0_04,"s5k4ca_init0_04") < 0)
+			return -1;
 #endif
-	msleep(10);	
-	af_mode = -1;
+		msleep(10);	
+		af_mode = -1;
 
-	/* Check Sensor ID */
-	s5k4ca_sensor_get_id(client);
+		/* Check Sensor ID */
+		s5k4ca_sensor_get_id(client);
 #ifdef I2C_BURST_MODE //dha23 100325	
-	ret = s5k4ca_sensor_burst_write_list(client,s5k4ca_init1_04,"s5k4ca_init1_04");
+		ret = s5k4ca_sensor_burst_write_list(client,s5k4ca_init1_04,"s5k4ca_init1_04");
 #else
-	ret = s5k4ca_sensor_write_list(client,s5k4ca_init1_04,"s5k4ca_init1_04");
+		ret = s5k4ca_sensor_write_list(client,s5k4ca_init1_04,"s5k4ca_init1_04");
 #endif
 	
+	}
+	else
+	{
+		if(s5k4ca_sensor_write_list(client,s5k4ca_init0,"s5k4ca_init0") < 0)
+			return -1;
+
+		msleep(10);	
+
+		/* Check Sensor ID */
+		s5k4ca_sensor_get_id(client);
+
+		ret = s5k4ca_sensor_write_list(client,s5k4ca_init1,"s5k4ca_init1");
+	}
 	//s5k4ca_sensor_change_size(client, SENSOR_XGA);
 	return 0;
 }
@@ -508,104 +505,193 @@ static int s5k4ca_sensor_mode_set(struct i2c_client *client, int type)
 
 	printk("Sensor Mode ");
 
-	if (type & SENSOR_PREVIEW)
-	{	
-		printk("-> Preview ");
+	if (system_rev >= 0x40)
+	{
+
+		if (type & SENSOR_PREVIEW)
+		{	
+			printk("-> Preview ");
 #ifdef I2C_BURST_MODE //dha23 100325				
-		s5k4ca_sensor_burst_write_list(client,s5k4ca_preview_04,"s5k4ca_preview_04");
+			s5k4ca_sensor_burst_write_list(client,s5k4ca_preview_04,"s5k4ca_preview_04");
 #else
-		s5k4ca_sensor_write_list(client,s5k4ca_preview_04,"s5k4ca_preview_04");
+			s5k4ca_sensor_write_list(client,s5k4ca_preview_04,"s5k4ca_preview_04");
 #endif
-	}
 
-	else if (type & SENSOR_CAPTURE)
-	{	
-		printk("-> Capture ");
-
-		s5k4ca_sensor_ae_awb_unlock(client);
-
-		s5k4ca_sensor_write(client, 0x002C, 0x7000);	
-		s5k4ca_sensor_write(client, 0x002E, 0x12FE);
-		s5k4ca_sensor_read(client, 0x0F12, &light);
-		lux_value = light;
-
-		if (previous_scene_mode == SCENE_MODE_FIREWORKS) //dha23 101022 /* fireworks use own capture routine */
-		{
-			printk("Snapshot : firework capture\n");
-			s5k4ca_sensor_write_list(client,s5k4ca_snapshot_fireworks_04,"s5k4ca_snapshot_fireworks_04");
+		
 		}
-		else
+
+		else if (type & SENSOR_CAPTURE)
+		{	
+			printk("-> Capture ");
+
+			s5k4ca_sensor_ae_awb_unlock(client);
+
+			s5k4ca_sensor_write(client, 0x002C, 0x7000);	
+			s5k4ca_sensor_write(client, 0x002E, 0x12FE);
+			s5k4ca_sensor_read(client, 0x0F12, &light);
+			lux_value = light;
+
+            if (previous_scene_mode == 6) /* fireworks use own capture routine */
+            {
+                printk("Snapshot : firework capture\n");
+//                delay = s5k4ca_delay_firework_capture;
+
+                s5k4ca_sensor_write_list(client,s5k4ca_snapshot_fireworks_04,"s5k4ca_snapshot_fireworks_04");
+
+            }
+            else
+            {
+                if (light <= 0x18) /* Low light */
+                {	
+                
+                    printk("Snapshot : Low Light\n");
+//                    delay = s5k4ca_delay_normal_low_capture;
+                    
+                    if(previous_scene_mode == 3) 
+                    {
+                        printk("Snapshot : Night Mode\n");
+                    
+                        s5k4ca_sensor_write_list(client,s5k4ca_snapshot_nightmode_04,"s5k4ca_snapshot_nightmode_04");
+                    }
+                    else
+                    {
+                        printk("Snapshot : Normal mode \n");
+                        
+                        s5k4ca_sensor_write_list(client,s5k4ca_snapshot_normal_low_04,"s5k4ca_snapshot_normal_low_04");
+                    }
+                
+                }
+                
+                else
+                {
+#if 0                
+                    if (light <= 0x40)
+                    {
+                        printk("Snapshot : Normal Middle Lignt\n");
+//                        delay = s5k4ca_delay_normal_middle_capture;//600;
+                        s5k4ca_sensor_write_list(client,s5k4ca_capture_normal_middle_04,"s5k4ca_capture_normal_middle_04");
+                    }
+                    else
+#endif                    
+                    {	
+                        printk("Snapshot : Normal Normal Light\n");
+//                        delay = s5k4ca_delay_normal_normal_capture;//300;
+                        s5k4ca_sensor_write_list(client,s5k4ca_capture_normal_normal_04,"s5k4ca_capture_normal_normal_04");
+                    }
+                    
+                }
+			}
+		}
+		else if (type & SENSOR_FLASH_CAP_LOW)
+		{	
+  			printk("flash Normal Low Light Capture\n");
+	  		delay = 300;
+
+			s5k4ca_sensor_write_list(client,s5k4ca_flashcapture_low_04,"s5k4ca_flashcapture_low_04");
+			printk("delay time(%d msec)\n", delay);
+		}
+		else if (type & SENSOR_FLASH_CAPTURE)
+		{	
+			printk("flash Normal Normal Light Capture\n");
+			delay = 300;
+
+			s5k4ca_sensor_write_list(client,s5k4ca_flashcapture_04,"s5k4ca_flashcapture_04");
+			printk("delay time(%d msec)\n", delay);
+		}
+		else if (type & SENSOR_CAMCORDER )
 		{
+			printk("Record\n");
+						
+			s5k4ca_sensor_write(client, 0xFCFC, 0xD000); 
+            s5k4ca_sensor_write(client, 0x0028, 0x7000); 
+
+            s5k4ca_sensor_write(client, 0x002A, 0x030E);  
+            s5k4ca_sensor_write(client, 0x0F12, 0x00DF);  //030E = 00FF 입력위해 다른값 임시입력
+
+            s5k4ca_sensor_write(client, 0x002A, 0x030C); 
+            s5k4ca_sensor_write(client, 0x0F12, 0x0000); // AF Manual 
+
+            msleep(130); //AF Manual 명령 인식위한 1frame delay (저조도 7.5fps 133ms 고려)
+                         //여기까지 lens 움직임 없음
+            s5k4ca_sensor_write(client, 0x002A, 0x030E);  
+            s5k4ca_sensor_write(client, 0x0F12, 0x00E0);  // 030E = 00FF 입력. lens 움직임 
+             
+            msleep(50);  //lens가 목표지점까지 도달하기 위해 필요한 delay
+            
+			delay = 300;
+			s5k4ca_sensor_write_list(client,s5k4ca_fps_15fix_04,"s5k4ca_fps_15fix_04");
+			printk("delay time(%d msec)\n", delay);
+		}
+
+		msleep(delay);
+	
+		return 0;
+	}
+	else  
+	{
+		if (type & SENSOR_PREVIEW)
+		{	
+			printk("-> Preview ");
+            s5k4ca_sensor_write_list(client,s5k4ca_preview,"s5k4ca_preview");
+		}
+		else if (type & SENSOR_CAPTURE)
+		{	
+			printk("-> Capture ");
+						
+			s5k4ca_sensor_write(client, 0x002C, 0x7000);	
+			s5k4ca_sensor_write(client, 0x002E, 0x12FE);
+			s5k4ca_sensor_read(client, 0x0F12, &light);
+				
 			if (light <= 0x20) /* Low light */
 			{	
-				printk("Snapshot : Low Light\n");
-
-				if(previous_scene_mode == SCENE_MODE_NIGHT) //dha23 101022
-				{
-					printk("Snapshot : Night Mode\n");
-
-					s5k4ca_sensor_write_list(client,s5k4ca_snapshot_nightmode_04,"s5k4ca_snapshot_nightmode_04");
-				}
-				else
-				{
-					printk("Snapshot : Normal mode \n");
-					delay = 1000; //dha23 101128
-					s5k4ca_sensor_write_list(client,s5k4ca_snapshot_normal_low_04,"s5k4ca_snapshot_normal_low_04");
-				}
+				printk("Normal Low Light\n");
+//				delay = 1200;
+				
+				s5k4ca_sensor_write_list(client,s5k4ca_snapshot_low,"s5k4ca_snapshot_low");
 			}
 			else
 			{
-				printk("Snapshot : Normal Light\n");
-				delay = 150; //dha23 101128
-				s5k4ca_sensor_write_list(client,s5k4ca_capture_04,"s5k4ca_capture_04");
+				if (light <= 0x40)
+				{
+					printk("Normal Middle Lignt\n");
+//					delay = 600;
+				}
+				else
+				{	
+					printk("Normal Normal Light\n");
+//					delay = 300;
+				}
+				
+				s5k4ca_sensor_write_list(client,s5k4ca_capture,"s5k4ca_capture");
 			}
 		}
-	}
-	else if (type & SENSOR_FLASH_CAP_LOW)
-	{	
-		printk("-> Flash Low Light Capture\n");
-		delay = 300;
-
-		s5k4ca_sensor_write_list(client,s5k4ca_flashcapture_low_04,"s5k4ca_flashcapture_low_04");
-		printk("SENSOR_FLASH_CAP_LOW :: delay time(%d msec)\n", delay);
-	}
-	else if (type & SENSOR_FLASH_CAPTURE)
-	{	
-		printk("-> Flash Normal Light Capture\n");
-		delay = 300;
-
-		s5k4ca_sensor_write_list(client,s5k4ca_flashcapture_04,"s5k4ca_flashcapture_04");
-		printk("SENSOR_FLASH_CAPTURE :: delay time(%d msec)\n", delay);
-	}
-	else if (type & SENSOR_CAMCORDER )
-	{
-		printk("-> Record\n");
+		else if (type & SENSOR_FLASH_CAP_LOW)
+		{	
+  			printk("flash Normal Low Light Capture\n");
+//			delay = 1200;
+		
+			s5k4ca_sensor_write_list(client,s5k4ca_flashcapture_low,"s5k4ca_flashcapture_low");
+		}
+		else if (type & SENSOR_FLASH_CAPTURE)
+		{	
+	  		printk("flash Normal Normal Light Capture\n");
+//			delay = 300;
 					
-		s5k4ca_sensor_write(client, 0xFCFC, 0xD000); 
-		s5k4ca_sensor_write(client, 0x0028, 0x7000); 
+			s5k4ca_sensor_write_list(client,s5k4ca_flashcapture,"s5k4ca_flashcapture");
+		}
+		else if (type & SENSOR_CAMCORDER )
+		{
+			printk("Record\n");
+			delay = 300;
+			s5k4ca_sensor_write_list(client,s5k4ca_fps_15fix,"s5k4ca_fps_15fix");
+		}
+		
+		msleep(delay);
 
-		s5k4ca_sensor_write(client, 0x002A, 0x030E);  
-		s5k4ca_sensor_write(client, 0x0F12, 0x00DF);  //030E = 00FF 입력위해 다른값 임시입력
-
-		s5k4ca_sensor_write(client, 0x002A, 0x030C); 
-		s5k4ca_sensor_write(client, 0x0F12, 0x0000); // AF Manual 
-
-		msleep(130); //AF Manual 명령 인식위한 1frame delay (저조도 7.5fps 133ms 고려)
-		//여기까지 lens 움직임 없음
-		s5k4ca_sensor_write(client, 0x002A, 0x030E);  
-		s5k4ca_sensor_write(client, 0x0F12, 0x00E0);  // 030E = 00FF 입력. lens 움직임 
-
-		msleep(50);  //lens가 목표지점까지 도달하기 위해 필요한 delay
-        
-		delay = 300;
-		s5k4ca_sensor_write_list(client,s5k4ca_fps_15fix_04,"s5k4ca_fps_15fix_04");
-		printk("SENSOR_CAMCORDER :: delay time(%d msec)\n", delay);
+		printk("delay time(%d msec)\n", delay);
+			
+		return 0;
 	}
-
-	msleep(delay);
-
-	return 0;
-	
 }
 
 static int s5k4ca_sensor_change_size(struct i2c_client *client, int size)
@@ -638,9 +724,13 @@ static int s5k4ca_sensor_af_control(struct i2c_client *client, int type)
     {
         case 0: // release
             printk("[CAM-SENSOR] Focus Mode -> release\n"); 
-			
-            s5k4ca_sensor_ae_awb_unlock(client); // unlock AWB/AE
 
+            if( locked_ae_awb )
+            {    
+                s5k4ca_sensor_ae_awb_unlock(client); // unlock AWB/AE
+                locked_ae_awb = 0;
+            }            
+			
             //af move to initial position.
 
             s5k4ca_sensor_write(client, 0xFCFC, 0xD000);    
@@ -664,14 +754,15 @@ static int s5k4ca_sensor_af_control(struct i2c_client *client, int type)
         case 1: // AF start
 			printk("Focus Mode -> Single\n");
 
-            if( cam_flash_on ) //dha23 101004
-            {
-                printk("AE/AWB is not locked for flash!!! \n");
+            if( locked_ae_awb )
+            {    
+                s5k4ca_sensor_ae_awb_unlock(client); // lock AWB/AE
+                locked_ae_awb = 0;
+                msleep(200);
             }
-            else
-            {
-                s5k4ca_sensor_ae_awb_lock(client); // lock AWB/AE
-            }
+
+            s5k4ca_sensor_ae_awb_lock(client); // lock AWB/AE
+            locked_ae_awb = 1;
 
             s5k4ca_sensor_write(client, 0xFCFC, 0xD000); 
             s5k4ca_sensor_write(client, 0x0028, 0x7000); 
@@ -897,47 +988,85 @@ static int s5k4ca_sensor_change_effect(struct i2c_client *client, int type)
 	
 	printk("Effects Mode ");
 
-	switch (type)
+	if (system_rev >= 0x40)
 	{
-		case 0:
-			printk("-> Mode None\n");
-			s5k4ca_sensor_write_list(client,s5k4ca_effect_off_04,"s5k4ca_effect_off_04");
+
+		switch (type)
+		{
+			case 0:
+			default:
+				printk("-> Mode None\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_effect_off_04,"s5k4ca_effect_off_04");
 			break;
 
-		case 1:
-			printk("-> Mode Gray\n");
-			s5k4ca_sensor_write_list(client,s5k4ca_effect_gray_04,"s5k4ca_effect_gray_04");
+			case 1:
+				printk("-> Mode Gray\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_effect_gray_04,"s5k4ca_effect_gray_04");
 			break;
 
-		case 2:
-			printk("-> Mode Sepia\n");
-			s5k4ca_sensor_write_list(client,s5k4ca_effect_sepia_04,"s5k4ca_effect_sepia_04");
+			case 2:
+				printk("-> Mode Sepia\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_effect_sepia_04,"s5k4ca_effect_sepia_04");
 			break;
 
-		case 3:
-			printk("-> Mode Negative\n");
-			s5k4ca_sensor_write_list(client,s5k4ca_effect_negative_04,"s5k4ca_effect_negative_04");
-			break;
-		
-		case 4:
-			printk("-> Mode Aqua\n");
-			s5k4ca_sensor_write_list(client,s5k4ca_effect_aqua_04,"s5k4ca_effect_aqua_04");
-			break;
-
-		case 5:
-			printk("-> Mode Sketch\n");
-			s5k4ca_sensor_write_list(client,s5k4ca_effect_sketch_04,"s5k4ca_effect_sketch_04");
-			break;
-
-		default:
-			printk("-> Mode None\n");
-			s5k4ca_sensor_write_list(client,s5k4ca_effect_off_04,"s5k4ca_effect_off_04");
+			case 3:
+				printk("-> Mode Negative\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_effect_negative_04,"s5k4ca_effect_negative_04");
 			break;
 			
-	}
+			case 4:
+				printk("-> Mode Aqua\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_effect_aqua_04,"s5k4ca_effect_aqua_04");
+			break;
+
+			case 5:
+				printk("-> Mode Sketch\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_effect_sketch_04,"s5k4ca_effect_sketch_04");
+			break;
+		}
 
 	return 0;
 
+	}
+	
+	else
+	{
+		switch (type)
+		{
+			case 0:
+			default:
+				printk("-> Mode None\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_effect_off,"s5k4ca_effect_off");
+			break;
+
+			case 1:
+				printk("-> Mode Gray\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_effect_gray,"s5k4ca_effect_gray");
+			break;
+			
+			case 2:
+				printk("-> Mode Sepia\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_effect_sepia,"s5k4ca_effect_sepia");
+			break;
+
+			case 3:
+				printk("-> Mode Negative\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_effect_negative,"s5k4ca_effect_negative");
+			break;
+
+			case 4:
+				printk("-> Mode Aqua\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_effect_aqua,"s5k4ca_effect_aqua");
+			break;
+
+			case 5:
+				printk("-> Mode Sketch\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_effect_sketch,"s5k4ca_effect_sketch");
+			break;
+		}
+
+		return 0;
+	}
 }
 
 static int s5k4ca_sensor_change_br(struct i2c_client *client, int type)
@@ -945,80 +1074,116 @@ static int s5k4ca_sensor_change_br(struct i2c_client *client, int type)
 
 	printk("Brightness Mode \n");
 
-	switch (type)
+	if (system_rev >= 0x40)
 	{
-		case 0: 
-			printk("-> Brightness Minus 4\n");
-			s5k4ca_sensor_write_list(client,s5k4ca_br_minus4_04,"s5k4ca_br_minus4_04");
+
+		switch (type)
+		{
+			case 0: 
+			default :
+				printk("-> Brightness Minus 4\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_br_minus4_04,"s5k4ca_br_minus4_04");
 			break;
 
-		case 1:
-			printk("-> Brightness Minus 3\n");	
-			s5k4ca_sensor_write_list(client,s5k4ca_br_minus3_04,"s5k4ca_br_minus3_04");
+			case 1:
+				printk("-> Brightness Minus 3\n");	
+				s5k4ca_sensor_write_list(client,s5k4ca_br_minus3_04,"s5k4ca_br_minus3_04");
 			break;
-		
-		case 2:
-			printk("-> Brightness Minus 2\n");
-			s5k4ca_sensor_write_list(client,s5k4ca_br_minus2_04,"s5k4ca_br_minus2_04");
+			
+			case 2:
+				printk("-> Brightness Minus 2\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_br_minus2_04,"s5k4ca_br_minus2_04");
 			break;
-		
-		case 3:				
-			printk("-> Brightness Minus 1\n");
-			s5k4ca_sensor_write_list(client,s5k4ca_br_minus1_04,"s5k4ca_br_minus1_04");
+			
+			case 3:				
+				printk("-> Brightness Minus 1\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_br_minus1_04,"s5k4ca_br_minus1_04");
 			break;
-		
-		case 4:
-			printk("-> Brightness Zero\n");
-			s5k4ca_sensor_write_list(client,s5k4ca_br_zero_04,"s5k4ca_br_zero_04");
-			break;
-
-		case 5:
-			printk("-> Brightness Plus 1\n");
-			s5k4ca_sensor_write_list(client,s5k4ca_br_plus1_04,"s5k4ca_br_plus1_04");
+			
+			case 4:
+				printk("-> Brightness Zero\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_br_zero_04,"s5k4ca_br_zero_04");
 			break;
 
-		case 6:
-			printk("-> Brightness Plus 2\n");
-			s5k4ca_sensor_write_list(client,s5k4ca_br_plus2_04,"s5k4ca_br_plus2_04");
+			case 5:
+				printk("-> Brightness Plus 1\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_br_plus1_04,"s5k4ca_br_plus1_04");
 			break;
 
-		case 7:
-			printk("-> Brightness Plus 3\n");
-			s5k4ca_sensor_write_list(client,s5k4ca_br_plus3_04,"s5k4ca_br_plus3_04");
+			case 6:
+				printk("-> Brightness Plus 2\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_br_plus2_04,"s5k4ca_br_plus2_04");
 			break;
 
-		case 8:
-			printk("-> Brightness Plus 4\n");
-			s5k4ca_sensor_write_list(client,s5k4ca_br_plus4_04,"s5k4ca_br_plus4_04");
+			case 7:
+				printk("-> Brightness Plus 3\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_br_plus3_04,"s5k4ca_br_plus3_04");
 			break;
 
-		default :
-			printk("-> Brightness Minus 4\n");
-			s5k4ca_sensor_write_list(client,s5k4ca_br_minus4_04,"s5k4ca_br_minus4_04");
+			case 8:
+				printk("-> Brightness Plus 4\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_br_plus4_04,"s5k4ca_br_plus4_04");
 			break;
-		
+			
+		}
+
+		return 0;
+
 	}
 
-	return 0;
-}
-
-static int s5k4ca_sensor_set_framerate(struct i2c_client *client, int type) //hjkang_DC11
-{
-	printk("Set FrameRate : %d\n",type);
-	switch(type)
+	else
 	{
-		case 0:
-			s5k4ca_sensor_write_list(client,s5k4ca_fps_nonfix_04,"s5k4ca_fps_nonfix_04"); //camcorder -> camera hjkang_DC18
+		switch (type)
+		{
+			case 0:	
+			default :
+				printk("-> Brightness Minus 4\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_br_minus4,"s5k4ca_br_minus4");
 			break;
 
-		case 15:
-			s5k4ca_sensor_write_list(client,s5k4ca_fps_15fix_04,"s5k4ca_fps_15fix_04"); //camera -> camcorder
+			case 1:
+				printk("-> Brightness Minus 3\n");	
+				s5k4ca_sensor_write_list(client,s5k4ca_br_minus3,"s5k4ca_br_minus3");
 			break;
 
-		default:
+			case 2:
+				printk("-> Brightness Minus 2\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_br_minus2,"s5k4ca_br_minus2");
 			break;
+
+			case 3:
+				printk("-> Brightness Minus 1\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_br_minus1,"s5k4ca_br_minus1");
+			break;
+
+			case 4:
+				printk("-> Brightness Zero\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_br_zero,"s5k4ca_br_zero");
+			break;
+
+			case 5:
+				printk("-> Brightness Plus 1\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_br_plus1,"s5k4ca_br_plus1");
+			break;
+
+			case 6:
+				printk("-> Brightness Plus 2\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_br_plus2,"s5k4ca_br_plus2");
+			break;
+			
+			case 7:
+				printk("-> Brightness Plus 3\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_br_plus3,"s5k4ca_br_plus3");
+			break;
+
+			case 8:
+				printk("-> Brightness Plus 4\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_br_plus4,"s5k4ca_br_plus4");
+			break;
+		}
+
+		return 0;
 	}
-	return 0;
 }
 
 static int s5k4ca_sensor_change_wb(struct i2c_client *client, int type)
@@ -1026,50 +1191,82 @@ static int s5k4ca_sensor_change_wb(struct i2c_client *client, int type)
 	
 	printk("White Balance Mode ");
 
-	switch (type)
+	if (system_rev >= 0x40)
 	{
-		case 0:
-			printk("-> WB auto mode\n");
-			s5k4ca_sensor_write_list(client,s5k4ca_wb_auto_04,"s5k4ca_wb_auto_04");
+		switch (type)
+		{
+			case 0:
+			default :
+				printk("-> WB auto mode\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_wb_auto_04,"s5k4ca_wb_auto_04");
+				previous_WB_mode = type;
 			break;
-		
-		case 1:
-			printk("-> WB Sunny mode\n");
-			s5k4ca_sensor_write_list(client,s5k4ca_wb_sunny_04,"s5k4ca_wb_sunny_04");
-			break;
-
-		case 2:
-			printk("-> WB Cloudy mode\n");
-			s5k4ca_sensor_write_list(client,s5k4ca_wb_cloudy_04,"s5k4ca_wb_cloudy_04");
-			break;
-
-		case 3:
-			printk("-> WB Flourescent mode\n");
-			s5k4ca_sensor_write_list(client,s5k4ca_wb_fluorescent_04,"s5k4ca_wb_fluorescent_04");
+			
+			case 1:
+				printk("-> WB Sunny mode\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_wb_sunny_04,"s5k4ca_wb_sunny_04");
+				previous_WB_mode = type;
 			break;
 
-		case 4:
-			printk("-> WB Tungsten mode\n");
-			s5k4ca_sensor_write_list(client,s5k4ca_wb_tungsten_04,"s5k4ca_wb_tungsten_04");
+			case 2:
+				printk("-> WB Cloudy mode\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_wb_cloudy_04,"s5k4ca_wb_cloudy_04");
+				previous_WB_mode = type;
 			break;
 
-		default :
-			printk("-> WB auto mode\n");
-			s5k4ca_sensor_write_list(client,s5k4ca_wb_auto_04,"s5k4ca_wb_auto_04");
+			case 3:
+				printk("-> WB Flourescent mode\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_wb_fluorescent_04,"s5k4ca_wb_fluorescent_04");
+				previous_WB_mode = type;
 			break;
 
+			case 4:
+				printk("-> WB Tungsten mode\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_wb_tungsten_04,"s5k4ca_wb_tungsten_04");
+				previous_WB_mode = type;
+			break;
+		}
+		return 0;
 	}
+	else
+	{
+		switch (type)
+		{
+			case 0:
+			default :
+				printk("-> WB auto mode\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_wb_auto,"s5k4ca_wb_auto");
+			break;
 
-	previous_WB_mode = type;
+			case 1:
+				printk("-> WB Sunny mode\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_wb_sunny,"s5k4ca_wb_sunny");
+			break;
 
+			case 2:
+				printk("-> WB Cloudy mode\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_wb_cloudy,"s5k4ca_wb_cloudy");
+			break;
+
+			case 3:
+				printk("-> WB Flourescent mode\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_wb_fluorescent,"s5k4ca_wb_fluorescent");
+			break;
+
+			case 4:
+				printk("-> WB Tungsten mode\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_wb_tungsten,"s5k4ca_wb_tungsten");
+			break;
+		}
 	return 0;
+	}
 }
 
 static int s5k4ca_sensor_change_contrast(struct i2c_client *client, int type)
 {
 	
 	printk("[CAM-SENSOR] =Contras Mode %d",type);
-#if 0	
+
 	switch (type)
 	{
 		case 0:
@@ -1094,14 +1291,15 @@ static int s5k4ca_sensor_change_contrast(struct i2c_client *client, int type)
 			s5k4ca_sensor_write_list(client,s5k4ca_contrast_P2,"s5k4ca_contrast_P2");
 			break;
 	}
-#endif
+
 	return 0;
 }
 
 static int s5k4ca_sensor_change_saturation(struct i2c_client *client, int type)
 {
+	
 	printk("[CAM-SENSOR] =Saturation Mode %d",type);
-#if 0	
+
 	switch (type)
 	{
 		case 0:
@@ -1126,14 +1324,15 @@ static int s5k4ca_sensor_change_saturation(struct i2c_client *client, int type)
 			s5k4ca_sensor_write_list(client,s5k4ca_Saturation_P2,"s5k4ca_Saturation_P2");
 			break;
 	}
-#endif
+
 	return 0;
 }
 
 static int s5k4ca_sensor_change_sharpness(struct i2c_client *client, int type)
 {
+	
 	printk("[CAM-SENSOR] =Sharpness Mode %d",type);
-#if 0	
+
 	switch (type)
 	{
 		case 0:
@@ -1158,14 +1357,15 @@ static int s5k4ca_sensor_change_sharpness(struct i2c_client *client, int type)
 			s5k4ca_sensor_write_list(client,s5k4ca_Sharpness_P2,"s5k4ca_Sharpness_P2");
 			break;
 	}
-#endif
+
 	return 0;
 }
 
 static int s5k4ca_sensor_change_iso(struct i2c_client *client, int type)
 {
+	
 	printk("[CAM-SENSOR] =Iso Mode %d",type);
-#if 0	
+
 	switch (type)
 	{
 		case 0:
@@ -1190,7 +1390,7 @@ static int s5k4ca_sensor_change_iso(struct i2c_client *client, int type)
 			s5k4ca_sensor_write_list(client,s5k4ca_iso400,"s5k4ca_iso400");
 			break;
 	}
-#endif
+
 	return 0;
 }
 
@@ -1198,98 +1398,130 @@ static int s5k4ca_sensor_change_iso(struct i2c_client *client, int type)
 static int s5k4ca_sensor_change_scene_mode(struct i2c_client *client, int type)
 {
 
-	printk("[CAM-SENSOR] =Scene Mode %d",type);
-	if(previous_scene_mode != SCENE_MODE_AUTO && type != SCENE_MODE_AUTO)
+	if (system_rev >= 0x40)
 	{
-		printk("-> Pre-auto-set");
-#ifdef I2C_BURST_MODE //dha23 101028				
-		s5k4ca_sensor_burst_write_list(client,s5k4ca_scene_mode_off_04,"s5k4ca_scene_mode_off_04");
-#else
-		s5k4ca_sensor_write_list(client,s5k4ca_scene_mode_off_04,"s5k4ca_scene_mode_off_04");
-#endif
-	}
-
-	switch (type)
-	{
-		case SCENE_MODE_AUTO:
-			printk("-> auto\n");
-#ifdef I2C_BURST_MODE //dha23 101028				
-			s5k4ca_sensor_burst_write_list(client,s5k4ca_scene_mode_off_04,"s5k4ca_scene_mode_off_04");
-#else
+		printk("[CAM-SENSOR] =Scene Mode %d",type);
+		if(previous_scene_mode != 0 && type != 0)
+		{
+			printk("-> Pre-auto-set");
 			s5k4ca_sensor_write_list(client,s5k4ca_scene_mode_off_04,"s5k4ca_scene_mode_off_04");
-#endif
-			break;
-			
-		case SCENE_MODE_PORTRAIT:
-			printk("-> portrait\n");
-#ifdef I2C_BURST_MODE //dha23 101028				
-			s5k4ca_sensor_burst_write_list(client,s5k4ca_scene_portrait_on_04,"s5k4ca_scene_portrait_on_04");
-#else
-			s5k4ca_sensor_write_list(client,s5k4ca_scene_portrait_on_04,"s5k4ca_scene_portrait_on_04");
-#endif
-			break;
-			
-		case SCENE_MODE_LANDSCAPE:
-			printk("-> landscape\n");
-#ifdef I2C_BURST_MODE //dha23 101028				
-			s5k4ca_sensor_burst_write_list(client,s5k4ca_scene_landscape_on_04,"s5k4ca_scene_landscape_on_04");
-#else
-			s5k4ca_sensor_write_list(client,s5k4ca_scene_landscape_on_04,"s5k4ca_scene_landscape_on_04");
-#endif
-			break;
-			
-		case SCENE_MODE_NIGHT:
-			printk("-> night\n");
-#ifdef I2C_BURST_MODE //dha23 101028				
-			s5k4ca_sensor_burst_write_list(client,s5k4ca_scene_nightmode_on_04,"s5k4ca_scene_nightmode_on_04");
-#else
-			s5k4ca_sensor_write_list(client,s5k4ca_scene_nightmode_on_04,"s5k4ca_scene_nightmode_on_04");
-#endif
-			break;
-			
-		case SCENE_MODE_BEACH:
-			printk("-> beach snow\n");
-#ifdef I2C_BURST_MODE //dha23 101028				
-			s5k4ca_sensor_burst_write_list(client,s5k4ca_scene_beach_snow_on_04,"s5k4ca_scene_beach_snow_on_04");
-#else
-			s5k4ca_sensor_write_list(client,s5k4ca_scene_beach_snow_on_04,"s5k4ca_scene_beach_snow_on_04");
-#endif
-			break;
-			
-		case SCENE_MODE_SNOW:
-			printk("-> beach snow\n");
-#ifdef I2C_BURST_MODE //dha23 101028				
-			s5k4ca_sensor_burst_write_list(client,s5k4ca_scene_beach_snow_on_04,"s5k4ca_scene_beach_snow_on_04");
-#else
-			s5k4ca_sensor_write_list(client,s5k4ca_scene_beach_snow_on_04,"s5k4ca_scene_beach_snow_on_04");
-#endif
-			break;
-			
-		case SCENE_MODE_SUNSET:
-			printk("-> sunset\n");
-#ifdef I2C_BURST_MODE //dha23 101028				
-			s5k4ca_sensor_burst_write_list(client,s5k4ca_scene_sunset_on_04,"s5k4ca_scene_sunset_on_04");
-#else
-			s5k4ca_sensor_write_list(client,s5k4ca_scene_sunset_on_04,"s5k4ca_scene_sunset_on_04");
-#endif
-			break;
-			
-		case SCENE_MODE_FIREWORKS:
-			printk("-> fireworks\n");
-#ifdef I2C_BURST_MODE //dha23 101028				
-			s5k4ca_sensor_burst_write_list(client,s5k4ca_scene_fireworks_on_04,"s5k4ca_scene_fireworks_on_04");
-#else
-			s5k4ca_sensor_write_list(client,s5k4ca_scene_fireworks_on_04,"s5k4ca_scene_fireworks_on_04");
-#endif
-			break;
+		}
 
-		default :
-			printk("-> UnKnow Scene Mode\n");
-			break;
+		switch (type)
+		{
+			case 0:
+				printk("-> auto\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_scene_mode_off_04,"s5k4ca_scene_mode_off_04");
+				previous_scene_mode = type;
+				break;
+			case 1:
+				printk("-> portrait\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_scene_portrait_on_04,"s5k4ca_scene_portrait_on_04");
+				previous_scene_mode = type;
+				break;
+			case 2:
+				printk("-> landscape\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_scene_landscape_on_04,"s5k4ca_scene_landscape_on_04");
+				previous_scene_mode = type;
+				break;
+			case 3:
+				printk("-> night\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_nightmode_on_04,"s5k4ca_nightmode_on_04");
+				previous_scene_mode = type;
+				break;
+			case 4:
+				printk("-> sunset\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_scene_sunset_on_04,"s5k4ca_scene_sunset_on_04");
+				previous_scene_mode = type;
+				break;
+			case 5:
+				printk("-> sports\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_scene_sports_on_04,"s5k4ca_scene_sports_on_04");
+				previous_scene_mode = type;
+				break;
+			case 6:
+				printk("-> fireworks\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_scene_fireworks_on_04,"s5k4ca_scene_fireworks_on_04");
+				previous_scene_mode = type;
+				break;
+			case 7:
+				printk("-> candlelight\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_scene_candlelight_on_04,"s5k4ca_scene_candlelight_on_04");
+				previous_scene_mode = type;
+				break;
+			case 8:
+				printk("-> text\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_scene_text_on_04,"s5k4ca_scene_text_on_04");
+				previous_scene_mode = type;
+				break;
+			case 9:
+				printk("-> beach snow\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_scene_beach_snow_on_04,"s5k4ca_scene_beach_snow_on_04");
+				previous_scene_mode = type;
+				break;
+			case 10:
+				printk("-> party indoor\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_scene_party_indoor_on_04,"s5k4ca_scene_party_indoor_on_04");
+				previous_scene_mode = type;
+				break;
+			default :
+				printk("-> UnKnow Scene Mode\n");
+				break;
+		}
+
+		previous_scene_mode = type;
 	}
+	else
+	{
+		printk("[CAM-SENSOR] =Scene Mode %d",type);
+		switch (previous_scene_mode)
+		{
+			case 1:
+				printk("-> portrait off");
+				s5k4ca_sensor_write_list(client,s5k4ca_scene_portrait_off,"s5k4ca_scene_portrait_off");
+				break;
+			case 2:
+				printk("-> landscape off");
+				s5k4ca_sensor_write_list(client,s5k4ca_scene_landscape_off,"s5k4ca_scene_landscape_off");
+				break;
+			case 3:
+				printk("-> night off");
+				s5k4ca_sensor_write_list(client,s5k4ca_nightmode_off,"s5k4ca_nightmode_off");
+				break;
+			case 4:
+				printk("-> sunset off");
+				s5k4ca_sensor_write_list(client,s5k4ca_scene_sunset_off,"s5k4ca_scene_sunset_off");
+				break;
+			default :
+				printk("-> UnKnow Scene Mode off");
+				break;
+		}
 
-	previous_scene_mode = type;
-	
+		switch (type)
+		{
+			case 1:
+				printk("-> portrait\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_scene_portrait_on,"s5k4ca_scene_portrait_on");
+				break;
+			case 2:
+				printk("-> landscape\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_scene_landscape_on,"s5k4ca_scene_landscape_on");
+				break;
+			case 3:
+				printk("-> night\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_nightmode_on,"s5k4ca_nightmode_on");
+				break;
+			case 4:
+				printk("-> sunset\n");
+				s5k4ca_sensor_write_list(client,s5k4ca_scene_sunset_on,"s5k4ca_scene_sunset_on");
+				break;
+			default :
+				printk("-> UnKnown Scene Mode\n");
+				break;
+		}
+
+		previous_scene_mode = type;		
+	}
 	return 0;
 }
 
@@ -1302,27 +1534,15 @@ static int s5k4ca_sensor_photometry(struct i2c_client *client, int type)
 	{
 		case 0:
 			printk("-> spot\n");
-#ifdef I2C_BURST_MODE //dha23 101028				
-			s5k4ca_sensor_burst_write_list(client,s5k4ca_metering_spot,"s5k4ca_metering_spot");
-#else
 			s5k4ca_sensor_write_list(client,s5k4ca_metering_spot,"s5k4ca_metering_spot");
-#endif
 			break;
 		case 1:
 			printk("-> matrix\n");
-#ifdef I2C_BURST_MODE //dha23 101028				
-			s5k4ca_sensor_burst_write_list(client,s5k4ca_metering_matrix,"s5k4ca_metering_matrix");
-#else
 			s5k4ca_sensor_write_list(client,s5k4ca_metering_matrix,"s5k4ca_metering_matrix");
-#endif
 			break;
 		case 2:
 			printk("-> center\n");
-#ifdef I2C_BURST_MODE //dha23 101028				
-			s5k4ca_sensor_burst_write_list(client,s5k4ca_metering_center,"s5k4ca_metering_center");
-#else
 			s5k4ca_sensor_write_list(client,s5k4ca_metering_center,"s5k4ca_metering_center");
-#endif
 			break;
 		default :
 			printk("-> UnKnown Metering Mode\n");
@@ -1464,11 +1684,6 @@ static int s5k4ca_sensor_command(struct i2c_client *client, unsigned int cmd, vo
 			s5k4ca_sensor_change_br(client, ctrl->value);
 			break;
 
-		case SENSOR_FRAMERATE: //hjkang_DC11
-			ctrl = (struct v4l2_control *)arg;
-			s5k4ca_sensor_set_framerate(client, ctrl->value);
-			break;
-
 		case SENSOR_WB:
 			ctrl = (struct v4l2_control *)arg;
 			s5k4ca_sensor_change_wb(client, ctrl->value);
@@ -1550,23 +1765,14 @@ static int s5k4ca_sensor_command(struct i2c_client *client, unsigned int cmd, vo
 		case SENSOR_FLASH_CAMERA:
 			ctrl = (struct v4l2_control *)arg;
 #ifdef CONFIG_FLASH_AAT1271A
-			printk("[SENSOR_FLASH_CAMERA] ctrl->value = %d ctrl->id = %d\n", ctrl->value, ctrl->id);
-
-			cam_flash_on = ctrl->value; //dha23 100527
-
-			if(ctrl->id == 1)
-			    aat1271a_flash_camera_control(ctrl->value);	
-			else if(ctrl->id == 2)
-			    aat1271a_flash_movie_control(ctrl->value);	
-			else if(ctrl->id == 3)
-			   aat1271a_flash_torch_camera_control(ctrl->value);
+			aat1271a_falsh_camera_control(ctrl->value);	
 #endif			
 			break;
 
 		case SENSOR_FLASH_MOVIE:
 			ctrl = (struct v4l2_control *)arg;
 #ifdef CONFIG_FLASH_AAT1271A
-			aat1271a_flash_movie_control(ctrl->value);	
+			aat1271a_falsh_movie_control(ctrl->value);	
 #endif
 			break;
 
@@ -1742,7 +1948,8 @@ static int s5k4ca_sensor_init(void)
 {
 	int ret;
 
-	cam_flash_on = 0; //dha23 101004
+	locked_ae_awb = 0;
+
 #ifdef CONFIG_LOAD_FILE
 	s5k4ca_regs_table_init();
 #endif

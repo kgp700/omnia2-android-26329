@@ -12,6 +12,13 @@
 #include <linux/kernel_sec_common.h>
 #include <asm/cacheflush.h>           // cacheflush
 
+#ifdef CONFIG_CIQ_CRASH_CATCHER
+#include <linux/seq_file.h>
+#include <linux/proc_fs.h>
+#include <linux/hrtimer.h>
+#include <asm/uaccess.h>
+#endif
+
 void __iomem * kernel_sec_viraddr_wdt_reset_reg;
 __used t_kernel_sec_arm_core_regsiters kernel_sec_core_reg_dump;
 __used t_kernel_sec_mmu_info           kernel_sec_mmu_reg_dump;
@@ -98,7 +105,7 @@ void kernel_sec_init(void)
 	kernel_sec_set_upload_cause(UPLOAD_CAUSE_INIT);	
 	kernel_sec_map_wdog_reg();
 
-//sdk_temp	kernel_sec_set_log_ptrs_for_getlog(get_kernel_log_mark());
+	kernel_sec_set_log_ptrs_for_getlog(get_kernel_log_mark());
 }
 EXPORT_SYMBOL(kernel_sec_init);
 
@@ -260,6 +267,30 @@ int kernel_sec_get_mmu_reg_dump(t_kernel_sec_mmu_info *mmu_info)
 }
 EXPORT_SYMBOL(kernel_sec_get_mmu_reg_dump);
 
+#ifdef CONFIG_CIQ_CRASH_CATCHER
+int crash_catcher_info_store(
+	t_kernel_sec_arm_core_regsiters *pregs, 
+	t_kernel_sec_mmu_info *pmmu)
+{
+	t_crash_catcher_info *pinfo = (t_crash_catcher_info*)UPLOAD_CRASH_CATCHER_INFO_ADDR;
+
+	pinfo->magic1 = 0xDEADDEAD;
+	pinfo->magic2 = 0x01234567;
+	
+	pinfo->timestamp = ktime_to_ns(ktime_get());
+	
+	memcpy((void*)&pinfo->regs, pregs, sizeof(t_kernel_sec_arm_core_regsiters));
+	memcpy((void*)&pinfo->mmuinfo, pregs, sizeof(t_kernel_sec_mmu_info));
+	memcpy((void*)&pinfo->taskinfo.task, current, sizeof(pinfo->taskinfo));
+
+	memcpy((void*)&pinfo->taskinfo.stack[0], current->stack, CC_STACK_SZ);
+	
+	printk(KERN_EMERG "Crash Catcher info stored\n");
+	
+	return 0;
+}
+#endif
+
 void kernel_sec_save_final_context(void)
 {
 	if(	kernel_sec_get_mmu_reg_dump(&kernel_sec_mmu_reg_dump) < 0)
@@ -269,6 +300,11 @@ void kernel_sec_save_final_context(void)
 	kernel_sec_get_core_reg_dump(&kernel_sec_core_reg_dump);
 
 	printk(KERN_EMERG "(kernel_sec_save_final_context) Final context was saved before the system reset.\n");
+	
+#ifdef CONFIG_CIQ_CRASH_CATCHER
+	crash_catcher_info_store(&kernel_sec_core_reg_dump, &kernel_sec_mmu_reg_dump);
+#endif
+	
 }
 EXPORT_SYMBOL(kernel_sec_save_final_context);
 
@@ -304,5 +340,320 @@ void kernel_sec_hw_reset(bool bSilentReset)
 	while(1);	
 }
 EXPORT_SYMBOL(kernel_sec_hw_reset);
+
+#ifdef CONFIG_CIQ_CRASH_CATCHER
+
+static int crash_info_show(struct seq_file *m, void *v)
+{
+	t_crash_catcher_info *pinfo = (t_crash_catcher_info*)UPLOAD_CRASH_CATCHER_INFO_ADDR;
+	int i;
+
+	if(	pinfo->magic1 != 0xDEADDEAD || pinfo->magic2 != 0x01234567) {
+		seq_printf(m, "Empty\n");
+		return 0;
+	}
+
+	seq_printf(m, "=======================================================\n");
+	seq_printf(m, "Crashed at %Lu\n", pinfo->timestamp);
+	seq_printf(m, "=======================================================\n");
+
+	seq_printf(m, "@ Registers\n");
+#define P(x) seq_printf(m, " %-40s: %08x\n", #x, (x))
+
+	// print registers
+	P(pinfo->regs.r0);
+	P(pinfo->regs.r1);
+	P(pinfo->regs.r2);
+	P(pinfo->regs.r3);
+	P(pinfo->regs.r4);
+	P(pinfo->regs.r5);
+	P(pinfo->regs.r6);
+	P(pinfo->regs.r7);
+	P(pinfo->regs.r8);
+	P(pinfo->regs.r9);
+	P(pinfo->regs.r10);
+	P(pinfo->regs.r11);
+	P(pinfo->regs.r12);
+	
+	P(pinfo->regs.r13_svc);
+	P(pinfo->regs.r14_svc);
+	P(pinfo->regs.spsr_svc);
+
+	P(pinfo->regs.pc);
+	P(pinfo->regs.cpsr);
+	
+	P(pinfo->regs.r13_usr);
+	P(pinfo->regs.r14_usr);
+
+	P(pinfo->regs.r8_fiq);
+	P(pinfo->regs.r9_fiq);
+	P(pinfo->regs.r10_fiq);
+	P(pinfo->regs.r11_fiq);
+	P(pinfo->regs.r12_fiq);
+	P(pinfo->regs.r13_fiq);
+	P(pinfo->regs.r14_fiq);
+	P(pinfo->regs.spsr_fiq);
+
+	P(pinfo->regs.r13_irq);
+	P(pinfo->regs.r14_irq);
+	P(pinfo->regs.spsr_irq);
+
+	P(pinfo->regs.r13_mon);
+	P(pinfo->regs.r14_mon);
+	P(pinfo->regs.spsr_mon);
+
+	P(pinfo->regs.r13_abt);
+	P(pinfo->regs.r14_abt);
+	P(pinfo->regs.spsr_abt);
+
+	P(pinfo->regs.r13_und);
+	P(pinfo->regs.r14_und);
+	P(pinfo->regs.spsr_und);	
+#undef P
+
+	// Task Info
+	seq_printf(m, "@ Task Info \n");
+	seq_printf(m, " %-20s : %s\n", "Name", pinfo->taskinfo.task.comm);
+	seq_printf(m, " %-20s : %d\n", "PID", pid_vnr(task_pid(&pinfo->taskinfo.task)));
+	seq_printf(m, " %-20s : %lu\n", "State", pinfo->taskinfo.task.state);
+	seq_printf(m, " %-20s : %08X\n", "Flags", pinfo->taskinfo.task.flags);	
+	seq_printf(m, " %-20s : %lu\n", "Start time", (long)pinfo->taskinfo.task.real_start_time.tv_sec);
+	seq_printf(m, " %-20s : \n", "Stack data");
+	for(i=0;i<CC_STACK_SZ;i++) {
+		seq_printf(m, " %08X", pinfo->taskinfo.stack[i]);
+		if((i+1)%8==0 & i!=0) {
+			seq_printf(m, "\n");
+		}
+	}
+	
+	seq_printf(m, "\n=======================================================\n");
+
+	return 0;
+}
+
+static int crash_info_open(struct inode *inode, struct file *filp)
+{
+	return single_open(filp, crash_info_show, NULL);
+}
+
+static ssize_t crash_info_write(struct file *file,
+		const char __user *buffer, size_t count, loff_t *ppos)
+{
+	t_crash_catcher_info *pinfo = (t_crash_catcher_info*)UPLOAD_CRASH_CATCHER_INFO_ADDR;
+	char c;
+	int rc;
+
+	rc = get_user(c, buffer);
+	if (rc)
+		return rc;
+	if (c == '0') {
+		pinfo->magic1 = 0xBEEFBEEF;
+	}
+
+	return count;
+}
+
+static const struct file_operations crash_info_fops = {
+	.open		= crash_info_open,
+	.read		= seq_read,
+	.write      = crash_info_write,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
+static int __init init_crash_info_procfs(void)
+{
+	struct proc_dir_entry *pe;
+
+	pe = proc_create("crashinfo", 0666, NULL, &crash_info_fops);
+	if (!pe)
+		return -ENOMEM;
+	return 0;
+}
+
+__initcall(init_crash_info_procfs);
+#endif
+
+#define CONFIG_MAKE_NICE
+#ifdef CONFIG_MAKE_NICE
+static int make_nice_show(struct seq_file *m, void *v)
+{
+	struct task_struct *tsk;
+
+	seq_printf(m, "======================\n");
+	seq_printf(m, " Task list (name:nice) \n");
+	seq_printf(m, "======================\n");
+	
+	read_lock(&tasklist_lock);
+	for_each_process (tsk) {
+		//printk(KERN_ERR "!@# %s %s\n", tsk->comm);
+		seq_printf(m, "%s:%d\n", tsk->comm, task_nice(tsk));
+	}
+	read_unlock(&tasklist_lock);
+	seq_printf(m, "======================\n");
+
+	return 0;
+}
+static int make_nice_open(struct inode *inode, struct file *filp)
+{
+	return single_open(filp, make_nice_show, NULL);
+}
+
+#include <linux/security.h>
+
+struct make_nice_struct {
+	struct delayed_work delayed_work;
+	char procname[TASK_COMM_LEN];
+};
+
+struct make_nice_struct make_nice_data;
+
+static void make_nice_delayed_work_handler(struct work_struct *work)
+{
+	struct make_nice_struct *data = container_of(work, struct make_nice_struct, delayed_work.work);
+	struct task_struct *tsk;
+	
+	printk(KERN_ERR "[make_nice] %s\n", __func__, data->procname);
+
+	read_lock(&tasklist_lock);
+	for_each_process(tsk) {
+		//printk(KERN_ERR "[make_nice] %16s:%d \n", tsk->comm, task_nice(tsk));
+		if(!strcmp(tsk->comm, data->procname)) {
+			
+			#if 1
+			printk(KERN_ERR "[make_nice] change nice of %s:%d\n", tsk->comm, task_nice(tsk));
+			// make it nicest
+			set_user_nice(tsk,19);
+			printk(KERN_ERR "[make_nice] nice of %s changed to %d\n", tsk->comm, task_nice(tsk));
+			#else
+			printk(KERN_ERR "KILL:  %s\n", tsk->comm);
+			kill_pid(task_pid(tsk), SIGTERM, 1);
+			#endif
+			break;
+		}
+	}
+	read_unlock(&tasklist_lock);
+
+}
+
+static ssize_t make_nice_write(struct file *file,
+		const char __user *buffer, size_t count, loff_t *ppos)
+{
+	char procname[TASK_COMM_LEN] = {0,};
+	int stringlen = count;
+	bool killed = 0;
+	struct task_struct *tsk;
+
+	if(count>TASK_COMM_LEN-1) {
+		buffer = buffer + count - (TASK_COMM_LEN-1);
+		stringlen = TASK_COMM_LEN-1;
+	}
+	
+	copy_from_user((void*)&procname[0], (void*)buffer, stringlen);
+	
+	printk(KERN_ERR "[make_nice] requested proc : %s (called from %s)\n", procname, current->comm);
+
+	strncpy(make_nice_data.procname, procname, TASK_COMM_LEN);
+	schedule_delayed_work(&make_nice_data.delayed_work, 3000);
+
+	return count;
+}
+
+static const struct file_operations make_nice_fops = {
+	.open		= make_nice_open,
+	.read		= seq_read,
+	.write      = make_nice_write,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
+static int __init init_make_nice_procfs(void)
+{
+	struct proc_dir_entry *pe;
+	
+	proc_mkdir("debug", NULL);
+	pe = proc_create("debug/make_nice", 0666, NULL, &make_nice_fops);
+	if (!pe)
+		return -ENOMEM;
+	
+	INIT_DELAYED_WORK(&make_nice_data.delayed_work, make_nice_delayed_work_handler);
+
+	return 0;
+}
+
+__initcall(init_make_nice_procfs);
+#endif
+
+
+
+#ifdef CONFIG_FORCED_PANIC
+
+static int forced_panic_show(struct seq_file *m, void *v)
+{
+	struct forced_panic_info *pinfo = (struct forced_panic_info*)FORCED_PANIC_ST_ADDR;
+	
+	if(	pinfo->magic1 != 0x00DEAD00 || pinfo->magic2 != 0x12000034) {
+		seq_printf(m, "Empty\n");
+		return 0;
+	}
+
+	seq_printf(m, "=======================================================\n");
+	seq_printf(m, "Forced panic message\n");
+	seq_printf(m, "=======================================================\n");
+
+	seq_printf(m, "\n%s\n\n", pinfo->msg);
+	
+	seq_printf(m, "=======================================================\n");
+
+	return 0;
+}
+static int forced_panic_open(struct inode *inode, struct file *filp)
+{
+	return single_open(filp, forced_panic_show, NULL);
+}
+
+static ssize_t forced_panic_write(struct file *file,
+		const char __user *buffer, size_t count, loff_t *ppos)
+{
+	struct forced_panic_info *pinfo = (struct forced_panic_info*)FORCED_PANIC_ST_ADDR;
+	
+	if(count >= sizeof(pinfo->msg)) {
+		count = sizeof(pinfo->msg) - 1;
+	}
+	
+	copy_from_user((void*)&pinfo->msg[0], (void*)buffer, count);
+
+	pinfo->msg[count] = 0x0;
+	
+	pinfo->magic1 = 0x00DEAD00;
+	pinfo->magic2 = 0x12000034;
+	
+	kernel_sec_save_final_context();
+	kernel_sec_set_upload_cause(UPLOAD_CAUSE_FORCED_UPLOAD);
+	kernel_sec_hw_reset(0);
+
+	return count;
+}
+
+static const struct file_operations forced_panic_fops = {
+	.open		= forced_panic_open,
+	.read		= seq_read,
+	.write      = forced_panic_write,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
+static int __init init_forced_panic_procfs(void)
+{
+	struct proc_dir_entry *pe;
+
+	pe = proc_create("forcepanic", 0666, NULL, &forced_panic_fops);
+	if (!pe)
+		return -ENOMEM;
+	return 0;
+}
+
+__initcall(init_forced_panic_procfs);
+#endif
 
 #endif // CONFIG_KERNEL_DEBUG_SEC

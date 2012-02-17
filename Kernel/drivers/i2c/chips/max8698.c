@@ -502,10 +502,10 @@ static int max8698_probe(struct i2c_client *client,const struct i2c_device_id *i
 {
 	struct i2c_client *c;
 	int ret = 0;
-
+    
 	max8698_i2c_client = client;
 	i2c_set_clientdata(client, max8698_i2c_client);
-
+    
     printk(KERN_DEBUG "[%s] probed %x\n", __func__, max8698_i2c_client);
 
 error:

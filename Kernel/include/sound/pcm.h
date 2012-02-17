@@ -38,7 +38,11 @@
 #endif
 
  //Sec_Feature Mr. Lee Ju hwan
-#define CONFIG_ANDROID_BUF_NUM 16
+//#if defined(CONFIG_MACH_MAX)||defined(CONFIG_MACH_VINSQ)||defined(CONFIG_MACH_VITAL)
+//#define CONFIG_ANDROID_BUF_NUM 2
+//#else
+//#define CONFIG_ANDROID_BUF_NUM 16
+//#endif
 
 /*
  *  Hardware (lowlevel) section

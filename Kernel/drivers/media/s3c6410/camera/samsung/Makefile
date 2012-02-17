@@ -11,3 +11,8 @@ obj-$(CONFIG_VIDEO_SAMSUNG_S5K4CA) += s5k4ca.o
 obj-$(CONFIG_VIDEO_SAMSUNG_PO4010) += po4010.o
 obj-$(CONFIG_VIDEO_SAMSUNG_AIT848) += ait848.o
 
+obj-$(CONFIG_VIDEO_SAMSUNG_S5K5CA) += s5k5ca.o
+obj-$(CONFIG_VIDEO_SAMSUNG_S5KA3D) += s5ka3d.o
+
+# camera flash
+obj-$(CONFIG_VIDEO_SAMSUNG)	+= flash/

@@ -19,8 +19,6 @@
 #define DEBUG_FSA9480(fmt,args...) do {} while(0)
 #endif
 
-#define GPIO_USB_SEL			S3C64XX_GPA(2)
-#define GPIO_USB_SEL_AF			1
 
 /********************************************************************/
 /* FSA9480 Register definition                                                                                */

@@ -18,304 +18,262 @@
 #include <linux/platform_device.h>
 #include <linux/miscdevice.h>
 #include <linux/clk.h>
-#include <linux/wakelock.h>	
+#include <linux/irq.h>
 
 #include <linux/io.h>
+#include <linux/irq.h>
 #include <mach/hardware.h>
 #include <asm/delay.h>
 #include <asm/irq.h>
 
 #include <plat/regs-gpio.h>
 #include <plat/regs-keypad.h>
-#include <linux/irq.h>
-#include <asm/io.h>
+
+#include <mach/gpio.h>
 #include <plat/gpio-cfg.h>
-#include <mach/spica.h>
-#include "s3c-keypad.h"
-#include "s3c-keypad-board.h"
-
-#include "../../../sound/soc/codecs/ak4671.h"  //HYH_20100423
-
-#ifdef CONFIG_KERNEL_DEBUG_SEC
-#include <linux/kernel_sec_common.h>
+#ifdef CONFIG_CPU_FREQ
+#include <plat/s3c64xx-dvfs.h>
 #endif
 
+#include "s3c-keypad.h"	
 
+#include <plat/pm.h>	
 
-static struct wake_lock s3c_key_wake_lock;	
-
+#undef S3C_KEYPAD_DEBUG 
 //#define S3C_KEYPAD_DEBUG 
 
 #ifdef S3C_KEYPAD_DEBUG
-#define DPRINTK(x...) printk("S3C-Keypad " x)
+#define DPRINTK(x...) printk(KERN_INFO "S3C-Keypad " x)
+#define INPUT_REPORT_KEY(a,b,c) do {				\
+		printk(KERN_ERR "%s:%d input_report_key(%x, %d, %d)\n", \
+		       __func__, __LINE__, a, b, c);			\
+		input_report_key(a,b,c);				\
+	} while (0)
 #else
 #define DPRINTK(x...)		/* !!!! */
+#define INPUT_REPORT_KEY	input_report_key
 #endif
 
-#define DEVICE_NAME "s3c-keypad"
+#define DEVICE_NAME "s3c-keypad"	
 
 #define TRUE 1
 #define FALSE 0
 
-#define FIRST_SCAN_INTERVAL    	(1)
-#define SCAN_INTERVAL    	(HZ/50)
 
 static struct timer_list keypad_timer;
+//static struct timer_list powerkey_timer;
 static int is_timer_on = FALSE;
 static struct clk *keypad_clock;
-static u32 prevmask_low = 0, prevmask_high = 0;
-static int keypad_sleep_flag = 1;	// Temporay Code by SYS.LSI
+struct resource *keypad_mem = NULL;		
+struct resource *keypad_irq = NULL;	
 
-static int keypad_scan(u32 *keymask_low, u32 *keymask_high)
+struct resource *res = NULL;
+struct input_dev *input_dev;
+struct s3c_keypad *s3c_keypad;
+
+static u32 keymask[KEYPAD_COLUMNS];
+static u32 prevmask[KEYPAD_COLUMNS];
+
+extern struct task_struct *find_task_by_pid(pid_t nr);
+//static int keylock = 0;
+//static unsigned int process_id = 0;
+
+static int in_sleep = 0;
+
+
+void earjack_report_key(unsigned int keycode, int value)
 {
-	u32 i,cval,rval;
+    input_report_key(s3c_keypad->dev, KEY_SEND, value);
+    //printk(DCM_INP, "[KEY] earjack key %s\n", value ? "pressed" : "released");   
+}
+EXPORT_SYMBOL(earjack_report_key);
 
-	for (i=0; i<KEYPAD_COLUMNS; i++) {
-		cval = KEYCOL_DMASK & ~((1 << i) | (1 << (i+ 8)));   // clear that column number and 
-		writel(cval, key_base+S3C_KEYIFCOL);               // make that Normal output.
-								   // others shuld be High-Z output.
+static int keypad_scan(void)
+{
 
+	u32 col, cval, rval;
+
+	for (col = 0; col < KEYPAD_COLUMNS; col++) {
+
+		cval = KEYCOL_DMASK & ~((1 << col) | (1 << (col + 8)));	
+
+		writel(cval, key_base + S3C_KEYIFCOL);	
 		udelay(KEYPAD_DELAY);
 
-		rval = ~(readl(key_base+S3C_KEYIFROW)) & ((1<<KEYPAD_ROWS)-1) ;
-		
-#if (KEYPAD_COLUMNS>4)	
-		if (i < 4)
-			*keymask_low |= (rval << (i * 8));
-		else 
-			*keymask_high |= (rval << ((i-4) * 8));
-#else
-		*keymask_low |= (rval << (i * 8));
-#endif
+		rval =~(readl(key_base + S3C_KEYIFROW)) & ((1 << KEYPAD_ROWS) -1);
+		keymask[col] = rval;
 	}
 
-	//[ <<yamaia><system><JKCha>
-	if(*keymask_low == 0x04040404)
-	{
-		//Preventing Send Key Event in the case of Right & Menu & Send & Home Keys... 
-		*keymask_low = *keymask_low & 0xFFFBFFFF;  
-		// 1111 1111 1111 1011 1111 1111 1111 1111  <<yamaia><system><JKCha>
-	}
-	//] wake lock for keypad scan operation complete
-
-
-	writel(KEYIFCOL_CLEAR, key_base+S3C_KEYIFCOL);
+	writel(KEYIFCOL_CLEAR, key_base + S3C_KEYIFCOL);
 
 	return 0;
 }
 
-static void process_input_report (struct s3c_keypad *s3c_keypad, u32 prevmask, u32 keymask, u32 index)
-{
-	struct input_dev             *dev = s3c_keypad->dev;
-	int i=0;
-	u32 press_mask = ((keymask ^ prevmask) & keymask); 
-	u32 release_mask = ((keymask ^ prevmask) & prevmask); 
-
-
-#if (CONFIG_SPICA_REV == CONFIG_SPICA_TEST_REV01)	// Temporary Code by SYS.LSI
-        u32 wake_key;
-
-	if (keypad_sleep_flag) {
-		i = 0;
-		while (press_mask) {
-			if (press_mask & 1) {
-				wake_key = GET_KEYCODE(i+index);
-				if(wake_key == ENDCALL_KEY || wake_key == HOLD_KEY) {
-					keypad_sleep_flag = 0;
-					input_report_key(dev, wake_key,1);
-					DPRINTK(": Pressed (index: %d, Keycode: %d)\n", i+index, GET_KEYCODE(i+index));
-					dprintk(KPD_PRS, ": Pressed (index: %d, Keycode: %d)\n", i+index, GET_KEYCODE(i+index));
-				}
-			}
-			press_mask >>= 1;
-			i++;
-		}
-		i = 0;
-		while (release_mask) {
-			if (release_mask & 1) {
-				wake_key = GET_KEYCODE(i+index);
-				if(wake_key == ENDCALL_KEY || wake_key == HOLD_KEY)
-					input_report_key(dev, wake_key,0);
-				DPRINTK(": Released (index: %d, Keycode: %d)\n", i+index, GET_KEYCODE(i+index));
-				dprintk(KPD_RLS, ": Released (index: %d, Keycode: %d)\n", i+index, GET_KEYCODE(i+index));
-			}
-			release_mask >>= 1;
-			i++;
-		}
-	}
-	else {
-#endif
-		i = 0;
-		while (press_mask) {
-			if (press_mask & 1) {
-				input_report_key(dev, GET_KEYCODE(i+index),1);
-				DPRINTK(": Pressed (index: %d, Keycode: %d)\n", i+index, GET_KEYCODE(i+index));
-			}
-			press_mask >>= 1;
-			i++;
-		}
-
-		i = 0;
-		while (release_mask) {
-			if (release_mask & 1) {
-				input_report_key(dev,GET_KEYCODE(i+index),0);
-				DPRINTK(": Released (index: %d, Keycode: %d)\n", i+index, GET_KEYCODE(i+index));
-			}
-			release_mask >>= 1;
-			i++;
-		}
-#if (CONFIG_SPICA_REV == CONFIG_SPICA_TEST_REV01)	// Temporary Code by SYS.LSI
-	}
-#endif
-}
-
-static inline void process_special_key (struct s3c_keypad *s3c_keypad, u32 keymask_low, u32 keymask_high)
-{
-	struct input_dev              *dev = s3c_keypad->dev;
-	struct s3c_keypad_extra       *extra = s3c_keypad->extra;
-	struct s3c_keypad_special_key *special_key = extra->special_key;
-	static int prev_bitmask = 0;
-	int i;
-
-	for (i=0; i<extra->special_key_num; i++, special_key+=1)
-	{
-	        if (keymask_low == special_key->mask_low 
-		    && keymask_high == special_key->mask_high 
-		    && !(prev_bitmask & (1<<i))) {
-        	        input_report_key(dev, special_key->keycode, 1);
-			DPRINTK(": Pressed (Keycode: %d, SPECIAL KEY)\n", special_key->keycode);
-			prev_bitmask |= (1<<i);
-			continue;
-		}
-		if ((prev_bitmask & (1<<i)) 
- 		    && keymask_low == 0 
-	    	    && keymask_high == 0)
-		{
-	       	        input_report_key(dev, special_key->keycode, 0);
-			DPRINTK(": Released (Keycode: %d, SPECIAL KEY)\n", special_key->keycode);
-			prev_bitmask ^= (1<<i);
-		}
-	}
-}
-
 static void keypad_timer_handler(unsigned long data)
 {
-	struct s3c_keypad *s3c_keypad = (struct s3c_keypad *)data;
-	u32 keymask_low = 0, keymask_high = 0;
+	u32 press_mask;
+	u32 release_mask;
+	u32 restart_timer = 0;
+	int i, col;
+	struct s3c_keypad *pdata = (struct s3c_keypad *)data;
+	struct input_dev *dev = pdata->dev;
 
-	keypad_scan(&keymask_low, &keymask_high);
+	keypad_scan();
 
-	process_special_key(s3c_keypad, keymask_low, keymask_high);
-
-	if (keymask_low != prevmask_low) {
-		process_input_report (s3c_keypad, prevmask_low, keymask_low, 0);
-		prevmask_low = keymask_low;
-	}
-#if (KEYPAD_COLUMNS>4)
-	if (keymask_high != prevmask_high) {
-		process_input_report (s3c_keypad, prevmask_high, keymask_high, 32);
-		prevmask_high = keymask_high;
-	}
+	for (col = 0; col < KEYPAD_COLUMNS; col++) {
+		press_mask = ((keymask[col] ^ prevmask[col]) & keymask[col]);
+		release_mask = ((keymask[col] ^ prevmask[col]) & prevmask[col]);
+/*
+#ifdef CONFIG_CPU_FREQ
+#if USE_PERF_LEVEL_KEYPAD
+		if (press_mask || release_mask)
+			set_dvfs_target_level(LEV_400MHZ);
 #endif
+#endif
+*/
+		i = col * KEYPAD_ROWS;
 
-	if (keymask_low | keymask_high) {
-		mod_timer(&keypad_timer,jiffies + SCAN_INTERVAL);
+		while (press_mask) {
+			if (press_mask & 1) {
+				input_report_key(dev, pdata->keycodes[i], 1);
+				DPRINTK("\nkey Pressed  : key %d map %d\n", i,
+					pdata->keycodes[i]);
+			}
+			press_mask >>= 1;
+			i++;
+		}
+
+		i = col * KEYPAD_ROWS;
+
+		while (release_mask) {
+			if (release_mask & 1) {
+				input_report_key(dev, pdata->keycodes[i], 0);
+				DPRINTK("\nkey Released : %d  map %d\n", i,
+					pdata->keycodes[i]);
+
+			}
+			release_mask >>= 1;
+			i++;
+		}
+		prevmask[col] = keymask[col];
+
+		restart_timer |= keymask[col];
+	}
+
+	if (restart_timer) {
+		mod_timer(&keypad_timer, jiffies + HZ / 10);
 	} else {
-		writel(KEYIFCON_INIT, key_base+S3C_KEYIFCON);
+		writel(KEYIFCON_INIT, key_base + S3C_KEYIFCON);
 		is_timer_on = FALSE;
-		wake_lock_timeout(&s3c_key_wake_lock, 2 * HZ); // <<yamaia><system><JKCha> : wake lock for keypad scan operation complete
-	}	
+	}
+
 }
+
+
 
 static irqreturn_t s3c_keypad_isr(int irq, void *dev_id)
 {
-	wake_lock(&s3c_key_wake_lock); // <<yamaia><system><JKCha> : wake lock for keypad scan operation complete
-	
-	/* disable keypad interrupt and schedule for keypad timer handler */
-	writel(readl(key_base+S3C_KEYIFCON) & ~(INT_F_EN|INT_R_EN), key_base+S3C_KEYIFCON);
 
-	keypad_timer.expires = jiffies + FIRST_SCAN_INTERVAL;
-	if ( is_timer_on == FALSE) {
+	/* disable keypad interrupt and schedule for keypad timer handler */
+	writel(readl(key_base + S3C_KEYIFCON) & ~(INT_F_EN | INT_R_EN), key_base + S3C_KEYIFCON);
+
+	keypad_timer.expires = jiffies;
+	if (is_timer_on == FALSE) {
 		add_timer(&keypad_timer);
 		is_timer_on = TRUE;
 	} else {
-		mod_timer(&keypad_timer,keypad_timer.expires);
+		mod_timer(&keypad_timer, keypad_timer.expires);
 	}
-	/*Clear the keypad interrupt status*/
-	writel(KEYIFSTSCLR_CLEAR, key_base+S3C_KEYIFSTSCLR);
+	/*Clear the keypad interrupt status */
+	writel(KEYIFSTSCLR_CLEAR, key_base + S3C_KEYIFSTSCLR);
 
 	return IRQ_HANDLED;
 }
 
-static irqreturn_t slide_int_handler(int irq, void *dev_id)
+static irqreturn_t s3c_keygpio_isr(int irq, void *dev_id)
 {
-	struct s3c_keypad       *s3c_keypad = (struct s3c_keypad *) dev_id;
-	struct s3c_keypad_slide *slide      = s3c_keypad->extra->slide;
-	int state;
+	unsigned int key_status;
+	static unsigned int prev_key_status= 0;
+	struct s3c_keypad *pdata = (struct s3c_keypad *)dev_id;
+	struct input_dev *dev = pdata->dev;
 
-	state = gpio_get_value(slide->gpio) ^ slide->state_upset;
-	DPRINTK(": changed Slide state (%d)\n", state);
+	// Beware that we may not obtain exact key up/down status at
+	// this point.
+	key_status = gpio_get_value(GPIO_nPOWER);
 
-	input_report_switch(s3c_keypad->dev, SW_LID, state);
-	input_sync(s3c_keypad->dev);
-
-	return IRQ_HANDLED;
-}
-
-static irqreturn_t gpio_int_handler(int irq, void *dev_id)
-{
-	struct s3c_keypad          *s3c_keypad = (struct s3c_keypad *) dev_id;
-	struct input_dev           *dev = s3c_keypad->dev;
-	struct s3c_keypad_extra    *extra = s3c_keypad->extra;
-	struct s3c_keypad_gpio_key *gpio_key = extra->gpio_key;
-	int i,state;
-
-       	DPRINTK(": gpio interrupt (IRQ: %d)\n", irq);
-
-	for (i=0; i<extra->gpio_key_num; i++)
-	{
-		if (gpio_key[i].eint == irq)
-		{
-			gpio_key = &gpio_key[i];
-			break;
+	// If ISR is called and up/down status remains the same, we
+	// must have lost one and should report that first with
+	// upside/down.
+	if (in_sleep) {
+		if (key_status == prev_key_status) {
+			INPUT_REPORT_KEY(dev, 26, key_status ? 1 : 0); 
 		}
+		in_sleep = 0;
 	}
 
-	if (gpio_key != NULL)
-	{
-		state = gpio_get_value(gpio_key->gpio);
-               	DPRINTK(": gpio state (%d, %d)\n", state , state ^ gpio_key->state_upset);
-		state ^= gpio_key->state_upset;
+	INPUT_REPORT_KEY(dev, 26, key_status ? 0 : 1);
 
-	        if(state) {
-        	        input_report_key(dev, gpio_key->keycode, 1);
-                	DPRINTK(": Pressed (Keycode: %d, GPIO KEY)\n", gpio_key->keycode);
-	        }
-        	else  {
-	                input_report_key(dev, gpio_key->keycode, 0);
-        	        DPRINTK(": Released (Keycode: %d, GPIO KEY)\n", gpio_key->keycode);
-	        }
-	}
- 
-        return IRQ_HANDLED;
+	prev_key_status = key_status;
+	//printk(KERN_DEBUG "s3c_keygpio_isr pwr key_status =%d\n", key_status);
+
+	return IRQ_HANDLED;
 }
+
+static int s3c_keygpio_isr_setup(void *pdev)
+{
+	int ret;
+
+	//PWR key
+	s3c_gpio_cfgpin(GPIO_nPOWER, S3C_GPIO_SFN(GPIO_nPOWER_AF));
+	s3c_gpio_setpull(GPIO_nPOWER, S3C_GPIO_PULL_NONE);
+
+	set_irq_type(IRQ_EINT(5), IRQ_TYPE_EDGE_BOTH);
+
+	// stk.lim: Add IRQF_DISABLED to eliminate any possible race
+	// regarding key status
+	ret = request_irq(IRQ_EINT(5), s3c_keygpio_isr, IRQF_DISABLED
+			  | IRQF_SAMPLE_RANDOM, "key gpio", (void *)pdev);
+
+	if (ret) {
+		printk("request_irq failed (IRQ_KEYPAD (gpio)) !!!\n");
+		ret = -EIO;
+	}
+
+	return ret;
+
+}
+
+static ssize_t keyshort_test(struct device *dev, struct device_attribute *attr,
+			     char *buf)
+{
+	int count;
+
+	if (!gpio_get_value(GPIO_KBR0) || !gpio_get_value(GPIO_KBR1)
+	    || !gpio_get_value(GPIO_KBR2) || !gpio_get_value(GPIO_nPOWER)) {
+		count = sprintf(buf, "PRESS\n");
+		//printk("keyshort_test: PRESS\n");
+	} else {
+		count = sprintf(buf, "RELEASE\n");
+		//printk("keyshort_test: RELEASE\n");
+	}
+
+	return count;
+}
+
+static DEVICE_ATTR(key_pressed, S_IRUGO | S_IWUSR | S_IWOTH | S_IXOTH,
+		   keyshort_test, NULL);
 
 static int __init s3c_keypad_probe(struct platform_device *pdev)
 {
-	struct resource *res, *keypad_mem, *keypad_irq = NULL;
+	struct resource *res, *keypad_mem, *keypad_irq;
 	struct input_dev *input_dev;
 	struct s3c_keypad *s3c_keypad;
-	int ret, size, key;
-	struct s3c_keypad_extra    	*extra = NULL;
-	struct s3c_keypad_slide    	*slide = NULL;
-	struct s3c_keypad_special_key    *special_key;
-	struct s3c_keypad_gpio_key 	*gpio_key;
-	int i;
-	char * input_dev_name;
+	int ret, size;
+	int key, code;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (res == NULL) {
-		dev_err(&pdev->dev,"no memory resource specified\n");
+		dev_err(&pdev->dev, "no memory resource specified\n");
 		return -ENOENT;
 	}
 
@@ -343,73 +301,66 @@ static int __init s3c_keypad_probe(struct platform_device *pdev)
 	}
 
 	clk_enable(keypad_clock);
-	
+
 	s3c_keypad = kzalloc(sizeof(struct s3c_keypad), GFP_KERNEL);
 	input_dev = input_allocate_device();
-	input_dev_name = (char *)kmalloc(sizeof("s3c-keypad-revxxxx"), GFP_KERNEL);
 
-	if (!s3c_keypad || !input_dev || !input_dev_name) {
+	if (!s3c_keypad || !input_dev) {
 		ret = -ENOMEM;
-		goto out;
+		goto err_alloc;
 	}
+
+
 
 	platform_set_drvdata(pdev, s3c_keypad);
-
-	DPRINTK(": system_rev 0x%04x\n", system_rev);
-	for (i=0; i<sizeof(s3c_keypad_extra)/sizeof(struct s3c_keypad_extra); i++)
-	{
-//		if (s3c_keypad_extra[i].board_num == g_board_num) {
-		if (s3c_keypad_extra[i].board_num == system_rev) {
-			extra = &s3c_keypad_extra[i];
-			sprintf(input_dev_name, "%s%s%04x", DEVICE_NAME, "-rev", system_rev); 
-			DPRINTK(": board rev 0x%04x is detected!\n", s3c_keypad_extra[i].board_num);
-			break;
-		}
-	}
-
-	if(!extra) {
-		extra = &s3c_keypad_extra[0];
-		sprintf(input_dev_name, "%s%s", DEVICE_NAME, "-rev0000"); 			//default revison 
-		DPRINTK(": failed to detect board rev. set default rev00\n");
-	}
-	DPRINTK(": input device name: %s.\n", input_dev_name);
-
 	s3c_keypad->dev = input_dev;
-	s3c_keypad->extra = extra;
-	slide = extra->slide;
-	special_key = extra->special_key;
-	gpio_key = extra->gpio_key;
 
-	writel(KEYIFCON_INIT, key_base+S3C_KEYIFCON);
-	writel(KEYIFFC_DIV, key_base+S3C_KEYIFFC);
+	writel(KEYIFCON_INIT, key_base + S3C_KEYIFCON);
+	writel(KEYIFFC_DIV, key_base + S3C_KEYIFFC);
 
-	/* Set GPIO Port for keypad mode and pull-up disable*/
+	/* Set GPIO Port for keypad mode and pull-up disable */
 	s3c_setup_keypad_cfg_gpio(KEYPAD_ROWS, KEYPAD_COLUMNS);
 
-	writel(KEYIFCOL_CLEAR, key_base+S3C_KEYIFCOL);
 
-	for(key = 200; key < 232; key++){
-        	input_set_capability(input_dev, EV_KEY, key+1);
+
+
+	writel(KEYIFCOL_CLEAR, key_base + S3C_KEYIFCOL);
+
+	/* create and register the input driver */
+	set_bit(EV_KEY, input_dev->evbit);
+	/*Commenting the generation of repeat events */
+	//set_bit(EV_REP, input_dev->evbit);
+	s3c_keypad->nr_rows = KEYPAD_ROWS;
+	s3c_keypad->no_cols = KEYPAD_COLUMNS;
+	s3c_keypad->total_keys = MAX_KEYPAD_NR;
+
+	for (key = 0; key < s3c_keypad->total_keys; key++) {
+		code = s3c_keypad->keycodes[key] = keypad_keycode[key];
+		if (code <= 0)
+			continue;
+		set_bit(code & KEY_MAX, input_dev->keybit);
 	}
 
-	for (i=0; i<extra->special_key_num; i++ ){
-        	input_set_capability(input_dev, EV_KEY, (special_key+i)->keycode);
-	}
+	printk("%s, keypad row number is %d, column is %d",__FUNCTION__, s3c_keypad->nr_rows, s3c_keypad->no_cols);
 
-	for (i=0; i<extra->gpio_key_num; i++ ){
-        	input_set_capability(input_dev, EV_KEY, (gpio_key+i)->keycode);
-	}
+	set_bit(26 & KEY_MAX, input_dev->keybit);
 
-	if (extra->slide != NULL)
-        	input_set_capability(input_dev, EV_SW, SW_LID);
-
-	input_dev->name = input_dev_name;
+	input_dev->name = DEVICE_NAME;
 	input_dev->phys = "s3c-keypad/input0";
-	
+
 	input_dev->id.bustype = BUS_HOST;
 	input_dev->id.vendor = 0x0001;
 	input_dev->id.product = 0x0001;
 	input_dev->id.version = 0x0001;
+
+	input_dev->keycode = keypad_keycode;
+
+	keypad_irq = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
+	ret = input_register_device(input_dev);
+	if (ret) {
+		printk("Unable to register s3c-keypad input device!!!\n");
+		goto out;
+	}
 
 	/* Scan timer init */
 	init_timer(&keypad_timer);
@@ -417,141 +368,77 @@ static int __init s3c_keypad_probe(struct platform_device *pdev)
 	keypad_timer.data = (unsigned long)s3c_keypad;
 
 	/* For IRQ_KEYPAD */
-	keypad_irq = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
 	if (keypad_irq == NULL) {
 		dev_err(&pdev->dev, "no irq resource specified\n");
 		ret = -ENOENT;
-		goto err_clk;
+		goto err_irq;
 	}
 
-	if (slide != NULL)
-	{
-
-		s3c_gpio_cfgpin(slide->gpio, S3C_GPIO_SFN(slide->gpio_af));
-		s3c_gpio_setpull(slide->gpio, S3C_GPIO_PULL_NONE);
-
-		set_irq_type(slide->eint, IRQ_TYPE_EDGE_BOTH);
-
-		ret = request_irq(slide->eint, slide_int_handler, IRQF_DISABLED,
-		    "s3c_keypad gpio key", (void *)s3c_keypad);
-		if (ret) {
-			printk(KERN_ERR "request_irq(%d) failed (IRQ for SLIDE) !!!\n", slide->eint);
-			ret = -EIO;
-			goto err_irq;
-		}
-	}
-
-	for (i=0; i<extra->gpio_key_num; i++, gpio_key+=1)
-	{
-		s3c_gpio_cfgpin(gpio_key->gpio, S3C_GPIO_SFN(gpio_key->gpio_af));
-		s3c_gpio_setpull(gpio_key->gpio, S3C_GPIO_PULL_NONE);
-
-		set_irq_type(gpio_key->eint, IRQ_TYPE_EDGE_BOTH);
-
-		ret = request_irq(gpio_key->eint, gpio_int_handler, IRQF_DISABLED,
-			    "s3c_keypad gpio key", (void *)s3c_keypad);
-		if (ret) {
-			printk(KERN_ERR "request_irq(%d) failed (IRQ for GPIO KEY) !!!\n", gpio_key->eint);
-			ret = -EIO;
-			goto err_irq;
-		}
-	}
-
-	ret = request_irq(keypad_irq->start, s3c_keypad_isr, IRQF_SAMPLE_RANDOM,
+	ret = request_irq(IRQ_KEYPAD, s3c_keypad_isr, IRQF_SAMPLE_RANDOM, //PREVIOUS OLD ONE
 		DEVICE_NAME, (void *) pdev);
 	if (ret) {
 		printk("request_irq failed (IRQ_KEYPAD) !!!\n");
 		ret = -EIO;
 		goto err_irq;
 	}
+	s3c_keygpio_isr_setup((void *)s3c_keypad);
+	printk(DEVICE_NAME " Initialized\n");
 
-	ret = input_register_device(input_dev);
-	if (ret) {
-		printk("Unable to register s3c-keypad input device!!!\n");
-		goto out;
+	if (device_create_file(&pdev->dev, &dev_attr_key_pressed) < 0) {
+		printk("%s s3c_keypad_probe\n", __FUNCTION__);
+		pr_err("Failed to create device file(%s)!\n",
+		       dev_attr_key_pressed.attr.name);
 	}
 
-	keypad_timer.expires = jiffies + (HZ/10);
-
-	if (is_timer_on == FALSE) {
-		add_timer(&keypad_timer);
-		is_timer_on = TRUE;
-	} else {
-		mod_timer(&keypad_timer,keypad_timer.expires);
-	}
-
-	printk( DEVICE_NAME " Initialized\n");
 	return 0;
 
-out:
-	input_free_device(input_dev);
-	kfree(s3c_keypad);
-
-err_irq:
+ out:
 	free_irq(keypad_irq->start, input_dev);
 	free_irq(keypad_irq->end, input_dev);
 
-	if (slide != NULL)
-		free_irq(extra->slide->eint, s3c_keypad);
+ err_irq:
+	input_free_device(input_dev);
+	kfree(s3c_keypad);
 
-	gpio_key = extra->gpio_key;
-	for (i=0; i<extra->gpio_key_num; i++, gpio_key+=1)
-		free_irq(gpio_key->eint, s3c_keypad);
-	
-err_clk:
+ err_alloc:
 	clk_disable(keypad_clock);
 	clk_put(keypad_clock);
 
-err_map:
+ err_clk:
 	iounmap(key_base);
 
-err_req:
+ err_map:
 	release_resource(keypad_mem);
 	kfree(keypad_mem);
 
+ err_req:
 	return ret;
 }
 
+
 static int s3c_keypad_remove(struct platform_device *pdev)
 {
-	struct s3c_keypad *s3c_keypad = platform_get_drvdata(pdev);
-	struct input_dev  *dev        = s3c_keypad->dev;
-	struct s3c_keypad_extra *extra = s3c_keypad->extra;
-	struct s3c_keypad_slide *slide = extra->slide;
-	struct s3c_keypad_gpio_key *gpio_key = extra->gpio_key;
+	struct input_dev *input_dev = platform_get_drvdata(pdev);
+	writel(KEYIFCON_CLEAR, key_base + S3C_KEYIFCON);
 
-	writel(KEYIFCON_CLEAR, key_base+S3C_KEYIFCON);
-
-	if(keypad_clock) {
+	if (keypad_clock) {
 		clk_disable(keypad_clock);
 		clk_put(keypad_clock);
 		keypad_clock = NULL;
 	}
 
-	free_irq(IRQ_KEYPAD, (void *) s3c_keypad);
-
-	del_timer(&keypad_timer);	
-
-	if (slide)
-	        free_irq(slide->eint, (void *) s3c_keypad);
-
-	if (gpio_key)
-	{
-		int i;
-		for (i=0; i<extra->gpio_key_num; i++, gpio_key+=1)
-        		free_irq(gpio_key->eint, (void *) s3c_keypad);
-	}
-
-	input_unregister_device(dev);
+	input_unregister_device(input_dev);
 	iounmap(key_base);
-	kfree(s3c_keypad);
+	kfree(pdev->dev.platform_data);
+	free_irq(IRQ_KEYPAD, (void *)pdev);
 
+	del_timer(&keypad_timer);
 	printk(DEVICE_NAME " Removed.\n");
 	return 0;
 }
 
 #ifdef CONFIG_PM
-#include <plat/pm.h>
+
 
 static struct sleep_save s3c_keypad_save[] = {
 	SAVE_ITEM(KEYPAD_ROW_GPIOCON),
@@ -560,90 +447,51 @@ static struct sleep_save s3c_keypad_save[] = {
 	SAVE_ITEM(KEYPAD_COL_GPIOPUD),
 };
 
-static int s3c_keypad_suspend(struct platform_device *pdev, pm_message_t state)
+static unsigned int keyifcon, keyiffc;
+static int s3c_keypad_suspend(struct platform_device *dev, pm_message_t state)
 {
-	struct s3c_keypad *s3c_keypad = platform_get_drvdata(pdev);
-	struct s3c_keypad_extra *extra = s3c_keypad->extra;
-	struct s3c_keypad_slide *slide = extra->slide;
-	struct s3c_keypad_gpio_key *gpio_key = extra->gpio_key;
-
-	keypad_sleep_flag = 1;
-
-	writel(KEYIFCON_CLEAR, key_base+S3C_KEYIFCON);
+	keyifcon = readl(key_base + S3C_KEYIFCON);
+	keyiffc = readl(key_base + S3C_KEYIFFC);
 
 	s3c6410_pm_do_save(s3c_keypad_save, ARRAY_SIZE(s3c_keypad_save));
-	
-	if (!extra->wakeup_by_keypad)
-	{
-		writel(~(0x0fffffff), KEYPAD_ROW_GPIOCON);
-		writel(~(0xffffffff), KEYPAD_COL_GPIOCON);
-	}
-	
+
+	//writel(~(0xfffffff), KEYPAD_ROW_GPIOCON);
+	//writel(~(0xfffffff), KEYPAD_COL_GPIOCON);
+
 	disable_irq(IRQ_KEYPAD);
 
-	if (slide)
-		disable_irq(slide->eint);
-
-	if (gpio_key)
-	{
-		int i;
-		for (i=0; i<extra->gpio_key_num; i++, gpio_key+=1)
-        		disable_irq(gpio_key->eint);
-	}
-
 	clk_disable(keypad_clock);
+
+	in_sleep = 1;
 
 	return 0;
 }
 
-static int s3c_keypad_resume(struct platform_device *pdev)
+static int s3c_keypad_resume(struct platform_device *dev)
 {
-	struct s3c_keypad *s3c_keypad = platform_get_drvdata(pdev);
-	struct s3c_keypad_extra *extra = s3c_keypad->extra;
-	struct s3c_keypad_slide *slide = extra->slide;
-	struct s3c_keypad_gpio_key *gpio_key = extra->gpio_key;
+//	struct s3c_keypad *s3c_keypad =
+//	    (struct s3c_keypad *)platform_get_drvdata(dev);
+//	struct input_dev *iDev = s3c_keypad->dev;
+//	unsigned int key_temp_data = 0;
+
+	printk(KERN_DEBUG "++++ %s\n", __FUNCTION__);
 
 	clk_enable(keypad_clock);
 
-	if (is_timer_on)
-		del_timer (&keypad_timer);
-	is_timer_on = TRUE;
-	prevmask_low = 0;
-	prevmask_high = 0;
-	s3c_keypad_isr (0, NULL);
-	
-	enable_irq(IRQ_KEYPAD);
-
-	if (slide)
-	{
-		enable_irq(slide->eint);
-		slide_int_handler (slide->eint, (void *) s3c_keypad);
-	}
-
-	if (gpio_key)
-	{
-		int i;
-		for (i=0; i<extra->gpio_key_num; i++, gpio_key+=1)
-		{
-        		enable_irq(gpio_key->eint);
-			gpio_int_handler (gpio_key->eint, (void *) s3c_keypad);
-		}
-	}
-
-
-	writel(KEYIFCON_INIT, key_base+S3C_KEYIFCON);
-	writel(KEYIFFC_DIV, key_base+S3C_KEYIFFC);
+	writel(KEYIFCON_INIT, key_base + S3C_KEYIFCON);
+	writel(keyiffc, key_base + S3C_KEYIFFC);
+	writel(KEYIFCOL_CLEAR, key_base + S3C_KEYIFCOL);
 
 	s3c6410_pm_do_restore(s3c_keypad_save, ARRAY_SIZE(s3c_keypad_save));
 
-	writel(KEYIFCOL_CLEAR, key_base+S3C_KEYIFCOL);
-
+	enable_irq(IRQ_KEYPAD);
+	printk(KERN_DEBUG "---- %s\n", __FUNCTION__);
 	return 0;
 }
 #else
 #define s3c_keypad_suspend NULL
 #define s3c_keypad_resume  NULL
-#endif /* CONFIG_PM */
+#endif				/* CONFIG_PM */
 
 static struct platform_driver s3c_keypad_driver = {
 	.probe		= s3c_keypad_probe,
@@ -652,16 +500,13 @@ static struct platform_driver s3c_keypad_driver = {
 	.resume		= s3c_keypad_resume,
 	.driver		= {
 		.owner	= THIS_MODULE,
-		.name	= "s3c-keypad",
+		.name	= DEVICE_NAME,
 	},
 };
 
 static int __init s3c_keypad_init(void)
 {
 	int ret;
-
-	// <<yamaia><system><JKCha><jswoo> : wake lock Init for keypad scan operation complete
-	wake_lock_init(&s3c_key_wake_lock, WAKE_LOCK_SUSPEND,"s3c-keypad");
 
 	ret = platform_driver_register(&s3c_keypad_driver);
 	

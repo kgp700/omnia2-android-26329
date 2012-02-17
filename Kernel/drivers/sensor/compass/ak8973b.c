@@ -31,6 +31,34 @@
 #define I2C_DF_NOTIFY       0x01
 #define IRQ_COMPASS_INT IRQ_EINT(2) /* EINT(2) */
 
+#define O_MakmX 2
+#define O_MakmY 3
+#define O_MakmZ 4
+
+static int MakmX = O_MakmX;
+static int MakmY = O_MakmY;
+static int MakmZ = O_MakmZ;
+
+#define O_AX 6
+#define O_AY 7
+#define O_AZ 8
+#define O_MX 9
+#define O_MY 10
+#define O_MZ 11
+
+static int AX = O_AY;
+static int AY = O_AX;
+static int AZ = O_AZ;
+static int MX = O_MX;
+static int MY = O_MY;
+static int MZ = O_MZ;
+
+static int Makm_sign = 0; 
+static int accel_inp_dev_sign = 5; 
+static int mag_inpf_sign = 1; 
+
+static int print_flag = 0; 
+
 static struct i2c_client *this_client;
 
 struct ak8973b_data {
@@ -85,7 +113,7 @@ static int i2c_ak8973b_detect(struct i2c_client *, int kind, struct i2c_board_in
 
 unsigned short ignore[] = { I2C_CLIENT_END };
 static unsigned short normal_addr[] = { I2C_CLIENT_END };
-static unsigned short probe_addr[] = { 0, E_COMPASS_ADDRESS, I2C_CLIENT_END };
+static unsigned short probe_addr[] = { 1, E_COMPASS_ADDRESS, I2C_CLIENT_END };
 
 
 static struct i2c_client_address_data addr_data = {
@@ -112,20 +140,10 @@ static struct i2c_driver ak8973b_i2c_driver = {
 	.remove			= __devexit_p(i2c_ak8973b_remove),
 	.detect			= i2c_ak8973b_detect,
 	.id_table		= ak8973b_id,
-	.address_data		= &addr_data,
+	.address_data	= &addr_data,
 };
 
 static char ak_e2prom_data[3];
-
-void report_value_for_prx(int value)
-{
-		
-	struct ak8973b_data *data = i2c_get_clientdata(this_client);
-	printk("[AK8973] Proximity = %d\n", value);
-	input_report_abs(data->input_dev, ABS_DISTANCE,value );
-	input_sync(data->input_dev);
-
-}
 
 static int AKI2C_RxData(char *rxData, int length)
 {
@@ -198,31 +216,45 @@ static int akm_aot_release(struct inode *inode, struct file *file)
 
 static void AKECS_Report_Value(short *rbuf)
 {
+short ax, ay, az, mx, my, mz;	
+
 	struct ak8973b_data *data = i2c_get_clientdata(this_client);
+	
 	#if 0
-	gprintk("Orientaion: yaw = %d, pitch = %d, roll = %d\n", rbuf[0],
+	printk("Orientaion: yaw = %d, pitch = %d, roll = %d\n", rbuf[0],
 			rbuf[1], rbuf[2]);
-	gprintk("tmp = %d, m_stat= %d, g_stat=%d\n", rbuf[3],
+	printk("tmp = %d, m_stat= %d, g_stat=%d\n", rbuf[3],
 			rbuf[4], rbuf[5]);
-	gprintk("Acceleration:   x = %d LSB, y = %d LSB, z = %d LSB\n",
+	printk("Acceleration:   x = %d LSB, y = %d LSB, z = %d LSB\n",
 			rbuf[6], rbuf[7], rbuf[8]);
-	gprintk("Magnetic:   x = %d LSB, y = %d LSB, z = %d LSB\n\n",
+	printk("Magnetic:   x = %d LSB, y = %d LSB, z = %d LSB\n\n",
 			rbuf[9], rbuf[10], rbuf[11]);
 	#endif
 	/*if flag is set, execute report */
-	/* Report magnetic sensor information */
+	/* Report Orientation information */
 	if (atomic_read(&m_flag)) {
-		input_report_abs(data->input_dev, ABS_RX, rbuf[0]);
-		input_report_abs(data->input_dev, ABS_RY, rbuf[1]);
-		input_report_abs(data->input_dev, ABS_RZ, rbuf[2]);
+		short AzConst = 180 * 64;
+		short azimut = rbuf[0];
+		short azimut_conv = ((azimut < AzConst) ? azimut + AzConst : azimut - AzConst);
+		input_report_abs(data->input_dev, ABS_RX, azimut_conv);
+//		input_report_abs(data->input_dev, ABS_RX, rbuf[0]);
+		input_report_abs(data->input_dev, ABS_RY, -rbuf[1]);
+		input_report_abs(data->input_dev, ABS_RZ, -rbuf[2]);
 		input_report_abs(data->input_dev, ABS_RUDDER, rbuf[4]);
 	}
 
 	/* Report acceleration sensor information */
+	ax = rbuf[AX];
+	ay = rbuf[AY];
+	az = rbuf[AZ];
+	if ( accel_inp_dev_sign & 4)  ax *= -1;
+	if ( accel_inp_dev_sign & 2)  ay *= -1;
+	if ( accel_inp_dev_sign & 1)  az *= -1;
+
 	if (atomic_read(&a_flag)) {
-		input_report_abs(data->input_dev, ABS_X, rbuf[6]);
-		input_report_abs(data->input_dev, ABS_Y, rbuf[7]);
-		input_report_abs(data->input_dev, ABS_Z, rbuf[8]);
+		input_report_abs(data->input_dev, ABS_X, ax);
+		input_report_abs(data->input_dev, ABS_Y, ay);
+		input_report_abs(data->input_dev, ABS_Z, az);
 		input_report_abs(data->input_dev, ABS_WHEEL, rbuf[5]);
 	}
 
@@ -231,19 +263,25 @@ static void AKECS_Report_Value(short *rbuf)
 		input_report_abs(data->input_dev, ABS_THROTTLE, rbuf[3]);
 	}
 
+	/* Report magnetic sensor information */
+	mx = rbuf[MX];
+	my = rbuf[MY];
+	mz = rbuf[MZ];
+	if ( mag_inpf_sign & 4)  mx *= -1;
+	if ( mag_inpf_sign & 2)  my *= -1;
+	if ( mag_inpf_sign & 1)  mz *= -1;
+
 	if (atomic_read(&mv_flag)) {
-		input_report_abs(data->input_dev, ABS_HAT0X, rbuf[9]);
-		input_report_abs(data->input_dev, ABS_HAT0Y, rbuf[10]);
-		input_report_abs(data->input_dev, ABS_BRAKE, rbuf[11]);
+		input_report_abs(data->input_dev, ABS_HAT0X, mx);
+		input_report_abs(data->input_dev, ABS_HAT0Y, my);
+		input_report_abs(data->input_dev, ABS_BRAKE, mz);
 	}
 	/* Report proximity information */
-	/*
 	if (atomic_read(&p_flag)) {
 		rbuf[12]=gp2a_get_proximity_value();
 		gprintk("Proximity = %d\n", rbuf[12]);
 		input_report_abs(data->input_dev, ABS_DISTANCE, rbuf[12]);
 	}
-	*/
 	
 	input_sync(data->input_dev);
 }
@@ -287,9 +325,9 @@ static void AKECS_CloseDone(void)
 static void AKECS_Reset (void)
 {
       
-	gpio_set_value(GPIO_MSENSE_RST_N, GPIO_LEVEL_LOW);
+	gpio_set_value(GPIO_MSENSE_RST, GPIO_LEVEL_LOW);
 	udelay(120);
-	gpio_set_value(GPIO_MSENSE_RST_N, GPIO_LEVEL_HIGH);
+	gpio_set_value(GPIO_MSENSE_RST, GPIO_LEVEL_HIGH);
 	gprintk("[ak8973b] RESET COMPLETE\n");
 }
 
@@ -465,7 +503,7 @@ static void AKECS_DATA_Measure(void)
 	value[9]=mag_sensor[1];		/* mag_x */
 	value[10]=mag_sensor[2];	/* mag_y */
 	value[11]=mag_sensor[3];	/* mag_z */
-	//value[12]=gp2a_get_proximity_value();
+	value[12]=gp2a_get_proximity_value();
 
 	AKECS_Report_Value(value);
 }
@@ -591,7 +629,7 @@ static int akmd_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static int
+	static int
 akmd_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 		unsigned long arg)
 {
@@ -605,6 +643,218 @@ akmd_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 	gprintk("start\n");
 
 	switch (cmd) {
+#if 1 //bss to find the correct settings		
+		case 10:
+			Makm_sign = 0;
+			break;
+
+		case 11:
+			Makm_sign = 1;
+			break;
+
+		case 12:
+			Makm_sign = 2;
+			break;
+
+		case 13:
+			Makm_sign = 3;
+			break;
+
+		case 14:
+			Makm_sign = 4;
+			break;
+
+		case 15:
+			Makm_sign = 5;
+			break;
+
+		case 16:
+			Makm_sign = 6;
+			break;
+
+		case 17:
+			Makm_sign = 7;
+			break;
+
+		case 20:
+			MakmX = O_MakmX;
+			MakmY = O_MakmY;
+			MakmZ = O_MakmZ;
+			break;
+
+		case 21:
+			MakmX = O_MakmX;
+			MakmY = O_MakmZ;
+			MakmZ = O_MakmY;
+			break;
+
+		case 22:
+			MakmX = O_MakmY;
+			MakmY = O_MakmX;
+			MakmZ = O_MakmZ;
+			break;
+
+		case 23:
+			MakmX = O_MakmY;
+			MakmY = O_MakmZ;
+			MakmZ = O_MakmX;
+			break;
+
+		case 24:
+			MakmX = O_MakmZ;
+			MakmY = O_MakmX;
+			MakmZ = O_MakmY;
+			break;
+
+		case 25:
+			MakmX = O_MakmZ;
+			MakmY = O_MakmY;
+			MakmZ = O_MakmX;
+			break;
+
+		case 110:
+			accel_inp_dev_sign = 0;
+			break;
+
+		case 111:
+			accel_inp_dev_sign = 1;
+			break;
+
+		case 112:
+			accel_inp_dev_sign = 2;
+			break;
+
+		case 113:
+			accel_inp_dev_sign = 3;
+			break;
+
+		case 114:
+			accel_inp_dev_sign = 4;
+			break;
+
+		case 115:
+			accel_inp_dev_sign = 5;
+			break;
+
+		case 116:
+			accel_inp_dev_sign = 6;
+			break;
+
+		case 117:
+			accel_inp_dev_sign = 7;
+			break;
+
+		case 120:
+			AX = O_AX;
+			AY = O_AY;
+			AZ = O_AZ;
+			break;
+
+		case 121:
+			AX = O_AX;
+			AY = O_AZ;
+			AZ = O_AY;
+			break;
+
+		case 122:
+			AX = O_AY;
+			AY = O_AX;
+			AZ = O_AZ;
+			break;
+
+		case 123:
+			AX = O_AY;
+			AY = O_AZ;
+			AZ = O_AX;
+			break;
+
+		case 124:
+			AX = O_AZ;
+			AY = O_AX;
+			AZ = O_AY;
+			break;
+
+		case 125:
+			AX = O_AZ;
+			AY = O_AY;
+			AZ = O_AX;
+			break;
+
+		case 210:
+			mag_inpf_sign = 1;
+			break;
+
+		case 211:
+			mag_inpf_sign = 1;
+			break;
+
+		case 212:
+			mag_inpf_sign = 2;
+			break;
+
+		case 213:
+			mag_inpf_sign = 3;
+			break;
+
+		case 214:
+			mag_inpf_sign = 4;
+			break;
+
+		case 215:
+			mag_inpf_sign = 5;
+			break;
+
+		case 216:
+			mag_inpf_sign = 6;
+			break;
+
+		case 217:
+			mag_inpf_sign = 7;
+			break;
+
+		case 220:
+			MX = O_MX;
+			MY = O_MY;
+			MZ = O_MZ;
+			break;
+
+		case 221:
+			MX = O_MX;
+			MY = O_MZ;
+			MZ = O_MY;
+			break;
+
+		case 222:
+			MX = O_MY;
+			MY = O_MX;
+			MZ = O_MZ;
+			break;
+
+		case 223:
+			MX = O_MY;
+			MY = O_MZ;
+			MZ = O_MX;
+			break;
+
+		case 224:
+			MX = O_MZ;
+			MY = O_MX;
+			MZ = O_MY;
+			break;
+
+		case 225:
+			MX = O_MZ;
+			MY = O_MY;
+			MZ = O_MX;
+			break;
+		case 300:
+			print_flag = 0;
+			break;
+		case 301:
+			print_flag = 1;
+			break;
+
+#endif			
 		case ECS_IOCTL_READ:
 		case ECS_IOCTL_WRITE:
 			if (copy_from_user(&rwbuf, argp, sizeof(rwbuf)))
@@ -645,6 +895,31 @@ akmd_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 			if (rwbuf[0] < 1)
 				return -EINVAL;
 			ret = AKI2C_RxData(&rwbuf[1], rwbuf[0]);
+			if (print_flag)  
+				printk("Ak orig sensor X: %d, Y: %d, Z: %d\n", 
+						rwbuf[O_MakmX], rwbuf[O_MakmY], rwbuf[O_MakmZ]);
+#if 1  //bss 
+			{ char akmX, akmY, akmZ;
+				akmX = rwbuf[MakmX];
+				akmY = rwbuf[MakmY];
+				akmZ = rwbuf[MakmZ];
+				if ( Makm_sign & 4) akmX *= -1;
+				if ( Makm_sign & 2) akmY *= -1;
+				if ( Makm_sign & 1) akmZ *= -1;
+				rwbuf[O_MakmX] = akmX;
+				rwbuf[O_MakmY] = akmY;
+				rwbuf[O_MakmZ] = akmZ;
+			}
+#endif 
+
+#if 0 //bss for i6500 eclair akmd2 on onmia_II
+			// for akmd, must revert and re-sign the x,y values: x=-y, y=x!!
+			{
+				char ch = rwbuf[2];
+				rwbuf[2] = -rwbuf[3];
+				rwbuf[3] = ch;
+			}
+#endif		
 			for(i=0; i<rwbuf[0]; i++){
 				gprintk(" %02x", rwbuf[i+1]);
 			}
@@ -661,6 +936,30 @@ akmd_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 			gprintk("\n");
 			if (rwbuf[0] < 2)
 				return -EINVAL;
+
+#if 0  //bss 
+			{ char akmX, akmY, akmZ;
+				akmX = rwbuf[MakmX];
+				akmY = rwbuf[MakmY];
+				akmZ = rwbuf[MakmZ];
+				if ( Makm_sign & 4) akmX *= -1;
+				if ( Makm_sign & 2) akmY *= -1;
+				if ( Makm_sign & 1) akmZ *= -1;
+				rwbuf[O_MakmX] = akmX;
+				rwbuf[O_MakmY] = akmY;
+				rwbuf[O_MakmZ] = akmZ;
+			}
+#endif 
+
+
+#if 0 //bss for i6500 eclair akmd2 on onmia_II
+			if (rwbuf[0] == 4) {
+				// the calibratin feedback must be exchanged too  x=y, y=-x !!
+				char ch = -rwbuf[2];
+				rwbuf[2] = rwbuf[3];
+				rwbuf[3] = ch;
+			}			
+#endif 
 			ret = AKI2C_TxData(&rwbuf[1], rwbuf[0]);
 			gprintk(" ret = %d\n", ret);
 			if (ret < 0)
@@ -769,14 +1068,14 @@ static void ak8973b_init_hw(void)
 	set_irq_type(IRQ_COMPASS_INT, IRQ_TYPE_EDGE_RISING);
 #endif
 
-	if(gpio_is_valid(GPIO_MSENSE_RST_N)){
-		if(gpio_request(GPIO_MSENSE_RST_N, S3C_GPIO_LAVEL(GPIO_MSENSE_RST_N)))
+	if(gpio_is_valid(GPIO_MSENSE_RST)){
+		if(gpio_request(GPIO_MSENSE_RST, S3C_GPIO_LAVEL(GPIO_MSENSE_RST)))
 		{
-			printk(KERN_ERR "Failed to request GPIO_MSENSE_RST_N!\n");
+			printk(KERN_ERR "Failed to request GPIO_MSENSE_RST!\n");
 		}
-		gpio_direction_output(GPIO_MSENSE_RST_N, GPIO_LEVEL_HIGH);
+		gpio_direction_output(GPIO_MSENSE_RST, GPIO_LEVEL_HIGH);
 	}
-	s3c_gpio_setpull(GPIO_MSENSE_RST_N, S3C_GPIO_PULL_NONE);
+	s3c_gpio_setpull(GPIO_MSENSE_RST, S3C_GPIO_PULL_NONE);
 
 	gprintk("gpio setting complete!\n");
 }
@@ -813,7 +1112,6 @@ static int __devinit i2c_ak8973b_probe(struct i2c_client *client, const struct i
 	int err = 0;
 	struct ak8973b_data *akm;
 
-	printk("%s called\n", __func__);
 	gprintk("start\n");
 
 	if ( !i2c_check_functionality(client->adapter,I2C_FUNC_SMBUS_BYTE_DATA) ) {
@@ -949,7 +1247,7 @@ static int __devexit i2c_ak8973b_remove(struct i2c_client *client)
 	akm = NULL;	
 	this_client = NULL;
 	
-	gpio_free(GPIO_MSENSE_RST_N);
+	gpio_free(GPIO_MSENSE_RST);
 	
 	gprintk("end\n");
 	return 0;
@@ -959,7 +1257,6 @@ static int __devexit i2c_ak8973b_remove(struct i2c_client *client)
 static int __init ak8973b_init(void)
 {
 	int ret = 0;
-	printk("%s called\n", __func__);
 	gprintk("__start\n");
 	ak8973b_init_hw();
 	AKECS_Reset(); /*module reset */
@@ -973,7 +1270,7 @@ static int __init ak8973b_init(void)
 	
 	if(this_client == NULL)
 	{
-		printk("[AK8973B] : %s : this_client is NULL\n", __func__);
+		printk("[AK8973B] this_client is NULL\n");
 	}
 	
 	return ret;

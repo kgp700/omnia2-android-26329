@@ -28,8 +28,13 @@
 //#define SUM_X_THRESHOLD		100
 //#define SUM_Y_THRESHOLD		100
 
-#define SUM_X_THRESHOLD		65
-#define SUM_Y_THRESHOLD		65
+#if defined (CONFIG_MACH_VINSQ) || defined(CONFIG_MACH_MAX) || defined(CONFIG_MACH_VITAL)
+#define SUM_X_THRESHOLD		30
+#define SUM_Y_THRESHOLD		30
+#else
+#define SUM_X_THRESHOLD		50
+#define SUM_Y_THRESHOLD		50
+#endif
 
 #define OJT_POLLING_PERIOD 		12500000  // 0.0125sec
 //#define OJT_POLLING_PERIOD 		500000000  // 0.5 sec

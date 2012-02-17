@@ -1,8 +1,8 @@
-/* camera/s3c_camera_driver.c
+/* drivers/media/video/s3c_camera_driver.c
  *
  * Copyright (c) 2008 Samsung Electronics
  *
- * Samsung S3C CAMERA driver
+ * Samsung S3C Camera driver
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -64,6 +64,13 @@
 #include "s3c_camif.h"
 #include "videodev2_s3c.h"
 
+#if defined (CONFIG_MACH_VITAL)
+#define BACKCAMERA   1
+#define FRONTCAMERA 2
+
+#define CONFIG_VIDEO_SAMSUNG_S5KA3D //insook0611
+#endif //insook1110
+
 #ifdef CONFIG_S3C64XX_DOMAIN_GATING
 #define USE_CAMERA_DOMAIN_GATING
 #endif /* CONFIG_S3C64XX_DOMAIN_GATING */
@@ -105,6 +112,11 @@
 	static struct timeval cstart,cend;
 	static int measure_capture_flag = 0;
 	static struct timeval interval_cstart,interval_cend;
+#endif
+
+#if defined (CONFIG_MACH_VITAL)
+int s3c_camif_release(struct file *file);
+unsigned int cameraId;
 #endif
 
 static unsigned long s3c_cam_in_use;
@@ -185,8 +197,17 @@ static int NUMBER_OF_INPUTS = 0;
 CAM_PP property;
 
 extern int s3c_camif_do_postprocess(camif_cfg_t *cfg);
+
+#ifdef CONFIG_VIDEO_SAMSUNG_S5KA3D
+extern void s5ka3d_sensor_enable(void);
+#endif
+
 #ifndef CONFIG_VIDEO_SAMSUNG_CE131
+#ifdef CONFIG_VIDEO_SAMSUNG_S5K5CA
+extern void s5k5ca_sensor_enable(void);
+#else
 extern void s5k4ca_sensor_enable(void);
+#endif
 #endif
 
 /*************************************************************************
@@ -313,7 +334,7 @@ static int s3c_camif_get_sensor_format(unsigned int    in_width, unsigned int   
 
 	__TRACE_CAMERA_DRV(printk("[CAM-DRV] +s3c_camif_get_sensor_format\n"));
 
-	#if defined(CONFIG_VIDEO_SAMSUNG_S5K4CA)
+	#if defined(CONFIG_VIDEO_SAMSUNG_S5K4CA) ||defined(CONFIG_VIDEO_SAMSUNG_S5K5CA)
 	{
 		if(2048 <= in_width || 1536 <= in_height)
 			sensor_type = SENSOR_QXGA;
@@ -503,8 +524,14 @@ static void s3c_camif_change_mode(camif_cfg_t *cfg, int mode)
 
 	if (mode == SENSOR_MAX)
 	{
-		#if defined(CONFIG_VIDEO_SAMSUNG_S5K4CA)
+
+		#if defined (CONFIG_MACH_VINSQ)
 			res = SENSOR_QXGA;
+		#elif defined (CONFIG_MACH_VITAL)
+			if(cameraId == BACKCAMERA)
+			res = SENSOR_QXGA;
+                        else if(cameraId == FRONTCAMERA)
+                         res = SENSOR_VGA;
 		#elif defined(CONFIG_VIDEO_SAMSUNG_CE131)
 			res = SENSOR_QSXGA;
 		#elif defined(CONFIG_VIDEO_SAMSUNG_S5K3AA)
@@ -517,8 +544,14 @@ static void s3c_camif_change_mode(camif_cfg_t *cfg, int mode)
 	}
 	else if (mode == SENSOR_DEFAULT)
 	{
-		#if defined(CONFIG_VIDEO_SAMSUNG_S5K4CA)
+		#if defined (CONFIG_MACH_VINSQ)
 			res = SENSOR_XGA;
+		#elif defined (CONFIG_MACH_VITAL)
+		    printk("\n >>>>> cameraid : %d <<<<<<<\n",cameraId);
+			if(cameraId == BACKCAMERA)
+			res = SENSOR_XGA;
+           else if(cameraId == FRONTCAMERA)
+             res = SENSOR_VGA;
 		#elif defined(CONFIG_VIDEO_SAMSUNG_CE131)
 			res = SENSOR_XGA;
 		#elif defined(CONFIG_VIDEO_SAMSUNG_S5K3AA)
@@ -531,9 +564,19 @@ static void s3c_camif_change_mode(camif_cfg_t *cfg, int mode)
 			res = SENSOR_VGA;
 		#endif
 	}
-	else
+	else{
+		#if defined (CONFIG_MACH_VINSQ)
 		res = mode;
-
+		#elif defined (CONFIG_MACH_VITAL)		
+                       printk("\n >>>>>s3c_camif_change_mode cameraid : %d <<<<<<<\n",cameraId);
+                       printk("\n >>>>>s3c_camif_change_mode mode : %d <<<<<<<\n",mode);
+			if(cameraId == BACKCAMERA)
+		res = mode;
+                        else if(cameraId == FRONTCAMERA)
+                         res = SENSOR_VGA;
+                       printk("\n >>>>>s3c_camif_change_mode res : %d <<<<<<<\n",res);                     
+		#endif
+        }
 	s3c_camif_stop_fimc(cfg);
 
 	switch (res) 
@@ -1122,6 +1165,18 @@ static int s3c_camif_v4l2_g_input(camif_cfg_t *cfg, unsigned long arg)
 static int s3c_camif_v4l2_s_input(camif_cfg_t *cfg, unsigned int index)
 {
 	__TRACE_CAMERA_DRV(printk("[CAM-DRV] +s3c_camif_v4l2_s_input\n"));
+
+      // index = 1;//''FRONTCAMERA;//temproray initializtion for testing
+
+#if defined (CONFIG_MACH_VITAL)
+
+       cameraId = index; 
+
+
+        printk("\n >>>>>>>> Index %d  %d <<<<<<<<<<<<< \n",index,NUMBER_OF_INPUTS);
+
+                       printk("\n >>>>> cameraid : %d <<<<<<<\n",cameraId);
+#endif //insook1110
 
 	if (index >= NUMBER_OF_INPUTS)
 		return -EINVAL;
@@ -2005,6 +2060,26 @@ long s3c_camif_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			printk("[CAM-DRV=INIT-OP=222] =[RECV REQBUFS CMD <-> RECV Init Sensor CMD]==========%4d msec=\n", ((t2.tv_sec*1000000+t2.tv_usec) - (t1.tv_sec*1000000+t1.tv_usec))/1000);
 		}
 #endif
+
+#if defined (CONFIG_MACH_VITAL)
+		{
+			int spcon_val;
+			
+			spcon_val = __raw_readl(S3C64XX_SPCON);
+			
+			
+			if(*((int *) arg) == BACKCAMERA)
+				spcon_val = spcon_val & (0x3FFFFFFF);
+			
+			else if(*((int *) arg) == FRONTCAMERA)	 
+			   spcon_val = ((spcon_val & (0x3FFFFFFF)) | (0x2 << 30));		  
+			
+			printk("s3c_camif_init_sensor %x\n", spcon_val );
+			__raw_writel(spcon_val, S3C64XX_SPCON);
+			msleep(5);
+		}
+#endif		
+
 		ret = s3c_camif_v4l2_s_input(cfg, *((int *) arg));
 #ifdef MEASURE_INIT_OPERATION
 		if(measure_init_flag)
@@ -2211,10 +2286,7 @@ long s3c_camif_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		ctrl = (struct v4l2_control *) arg; 
 		ret = cfg->cis->sensor->driver->command(cfg->cis->sensor, SENSOR_WB, (void *) arg);
 		break;
-    case VIDIOC_S_FRAMERATE: //hjkang_DC11
-		ctrl = (struct v4l2_control *) arg; 
-		ret = cfg->cis->sensor->driver->command(cfg->cis->sensor, SENSOR_FRAMERATE, (void *) arg);
-		break;
+
 	case VIDIOC_S_BRIGHTNESS:
 		ctrl = (struct v4l2_control *) arg; 
 		ret = cfg->cis->sensor->driver->command(cfg->cis->sensor, SENSOR_BRIGHTNESS, (void *) arg);
@@ -2239,6 +2311,13 @@ long s3c_camif_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		ctrl = (struct v4l2_control *) arg; 
 		ret = cfg->cis->sensor->driver->command(cfg->cis->sensor, SENSOR_EXIF_DATA, (void *) arg);
 		break;
+
+#if defined (CONFIG_MACH_VITAL)
+	case VIDIOC_S_FRAMERATE: //hjkang_DC11
+		ctrl = (struct v4l2_control *) arg; 
+		ret = cfg->cis->sensor->driver->command(cfg->cis->sensor, SENSOR_FRAMERATE, (void *) arg);               
+		break;
+#endif //insook1110		
 
 #ifdef CONFIG_VIDEO_SAMSUNG_CE131
 	case VIDIOC_S_SENSOR_DIG_ZOOM:
@@ -2401,8 +2480,14 @@ int s3c_camif_open(struct file *file)
 
 	file->private_data = cfg;
 
+#if defined (CONFIG_MACH_VINSQ)
 #ifndef CONFIG_VIDEO_SAMSUNG_CE131
+#ifdef CONFIG_VIDEO_SAMSUNG_S5K5CA
+	s5k5ca_sensor_enable();
+#else
 	s5k4ca_sensor_enable();
+#endif
+#endif
 #endif
 
 #ifdef MEASURE_INIT_OPERATION
@@ -2654,11 +2739,13 @@ int s3c_camif_init_sensor(camif_cfg_t *cfg)
 	camif_cis_t *cis = cfg->cis;
 	camif_cis_t *initialized_cis;
 
+#if defined (CONFIG_MACH_VINSQ)
 	int spcon_val;
 
 	spcon_val = __raw_readl(S3C64XX_SPCON);
 	spcon_val = spcon_val & (0x3FFFFFFF);
 	__raw_writel(spcon_val, S3C64XX_SPCON);
+#endif	
 
 	if (!cis->sensor) {
 		initialized_cis = (camif_cis_t *)((cis->init_sensor) ? cis : NULL);
@@ -2926,6 +3013,16 @@ extern int s5k4ca_sensor_add(void);
 extern void s5k4ca_sensor_remove(void);
 #endif
 
+#ifdef CONFIG_VIDEO_SAMSUNG_S5K5CA
+extern int s5k5ca_sensor_add(void);
+extern void s5k5ca_sensor_remove(void);
+#endif
+
+#ifdef CONFIG_VIDEO_SAMSUNG_S5KA3D
+extern int s5ka3d_sensor_add(void);
+extern void s5ka3d_sensor_remove(void);
+#endif
+
 #ifdef CONFIG_VIDEO_SAMSUNG_CE131
 extern int ce131_sensor_add(void);
 extern void ce131_sensor_remove(void);
@@ -2948,6 +3045,15 @@ static int s3c_camif_register(void)
 #ifdef CONFIG_VIDEO_SAMSUNG_S5K4CA
 	s5k4ca_sensor_add();
 #endif
+
+#ifdef CONFIG_VIDEO_SAMSUNG_S5K5CA
+	s5k5ca_sensor_add();
+#endif
+
+#ifdef CONFIG_VIDEO_SAMSUNG_S5KA3D
+	s5ka3d_sensor_add();
+#endif
+
 
 #ifdef CONFIG_VIDEO_SAMSUNG_CE131
 	ce131_sensor_add();
@@ -2976,6 +3082,13 @@ static void s3c_camif_unregister(void)
 
 #ifdef CONFIG_VIDEO_SAMSUNG_S5K4CA
 	s5k4ca_sensor_remove();
+#endif
+
+#ifdef CONFIG_VIDEO_SAMSUNG_S5K5CA
+	s5k5ca_sensor_remove();
+#endif
+#ifdef CONFIG_VIDEO_SAMSUNG_S5KA3D
+         s5ka3d_sensor_remove();    
 #endif
 
 #ifdef CONFIG_VIDEO_SAMSUNG_CE131

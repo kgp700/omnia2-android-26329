@@ -282,6 +282,13 @@ static int config_buf(struct usb_configuration *config,
 		len -= status;
 		next += status;
 	}
+	
+#if 1 //usb.num_interface_error temporary fix!!!!!! must be fixed!!!!!!!!!!
+	extern int adb_enabled;
+	if(adb_enabled==0) {
+		c->bNumInterfaces = 1;
+	}
+#endif
 
 	len = next - buf;
 	c->wTotalLength = cpu_to_le16(len);

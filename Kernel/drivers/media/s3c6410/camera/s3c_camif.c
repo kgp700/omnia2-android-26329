@@ -34,6 +34,7 @@
 #include <asm/io.h>
 #include <asm/uaccess.h>
 #include <asm/irq.h>
+#include <asm/gpio.h>
 
 #include <mach/map.h>
 #include <mach/hardware.h>
@@ -2058,7 +2059,13 @@ void s3c_camif_reset(int is, int delay)
 #endif
 			// (091124 / kcoolsw) : for removing lock-up when streamoff/on repeatly
 			//                      this is the root cause about lock-up...
-			msleep(50);
+#if defined (CONFIG_MACH_VITAL)
+			printk(KERN_INFO "s3c_camif_reset msleep 60\n");
+			msleep(60);
+#else												
+			msleep(50);    
+#endif   //insook fixed effect lockup issue   
+
 												
 			writel(val, cfg->regs + S3C_CIGCTRL);
 //			mdelay(1);

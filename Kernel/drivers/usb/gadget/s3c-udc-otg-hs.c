@@ -267,7 +267,12 @@ static int  s3c_ep0_write_fifo(struct s3c_ep *ep, struct s3c_request *req);
  * global usb_ctrlrequest struct to store 
  * Setup data of Control Request Host sent
  */
+#define __TEMP_FIX_FOR_DMA_ADDR_ERROR__
+#ifdef __TEMP_FIX_FOR_DMA_ADDR_ERROR__
+struct usb_ctrlrequest g_ctrl_array[9] __attribute__((aligned(8)));
+#else
 struct usb_ctrlrequest g_ctrl __attribute__((aligned(8)));
+#endif
 //---------------------------------------------------------------------------------------
 
 /**
@@ -638,13 +643,19 @@ EXPORT_SYMBOL(usb_gadget_unregister_driver);
 
 #if defined(CONFIG_USB_GADGET_S3C_OTGD_HS_DMA_MODE) 
 	/* DMA Mode */
+#ifdef __TEMP_FIX_FOR_DMA_ADDR_ERROR__
+#define g_ctrl g_ctrl_array[4]
+#endif
 	#include "s3c-udc-otg-hs_dma.c"
+#ifdef __TEMP_FIX_FOR_DMA_ADDR_ERROR__
+#undef g_ctrl
+#endif
 #else 
 	/* Slave Mode */
-	#error Unsupporting slave mode
+	#include "s3c-udc-otg-hs_slave.c"
 #endif
 
-#if NO_USING_USB_SWITCH 
+#if NO_USING_USB_SWITCH
 void fsa9480_s3c_udc_on(void)
 {	
     printk("[Psedo FSA9480]%s\n ", __func__);
@@ -1423,7 +1434,7 @@ static int s3c_udc_suspend(struct platform_device *pdev, pm_message_t state)
 			DEBUG_PM("[%s] skip~~ s3c_udc_power_down() at suspend\n", __func__);
 			spin_unlock_irqrestore(&dev->lock, flags);
 		return 0;
-	}
+		}
 	}
 
 	switch(pm_policy)

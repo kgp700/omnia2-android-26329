@@ -41,8 +41,6 @@
 #include <plat/regs-iic.h>
 #include <plat/iic.h>
 
-//#define CONFIG_MACH_SPICA      //!!!!!!!!!!!!!!
-
 /* i2c controller state */
 
 enum s3c_i2c_state {
@@ -491,7 +489,7 @@ static int s3c_i2c_set_master(struct s3c_i2c *i2c)
 static int s3c_i2c_doxfer(struct s3c_i2c *i2c,
 			      struct i2c_msg *msgs, int num)
 {
-#if !(defined(CONFIG_MACH_CYGNUS) || defined(CONFIG_MACH_SATURN) || defined(CONFIG_MACH_SPICA))
+#if !(defined(CONFIG_MACH_CYGNUS) || defined(CONFIG_MACH_SATURN))
 	struct s3c_platform_i2c *pdata = i2c->dev->platform_data;
 #endif
 	unsigned long timeout;
@@ -524,11 +522,11 @@ static int s3c_i2c_doxfer(struct s3c_i2c *i2c,
 
 #if defined(CONFIG_MACH_SPICA)
 		iicstat = readl(i2c->regs + S3C_IICSTAT);
-		if ((iicstat & S3C_IICSTAT_BUSBUSY)) {
-			iicstat &= ~(S3C_IICSTAT_TXRXEN | S3C_IICSTAT_BUSBUSY);
-			writel(iicstat, i2c->regs + S3C_IICSTAT);
-			printk("IICSTAT reg : 0x%x\n", readl(i2c->regs + S3C_IICSTAT));
-		}
+        if ((iicstat & S3C_IICSTAT_BUSBUSY)) {
+            iicstat &= ~(S3C_IICSTAT_TXRXEN | S3C_IICSTAT_BUSBUSY);
+            writel(iicstat, i2c->regs + S3C_IICSTAT);
+            printk("IICSTAT reg : 0x%x\n", readl(i2c->regs + S3C_IICSTAT));
+        }
 #endif
 
 		ret = -EAGAIN;
@@ -560,7 +558,7 @@ static int s3c_i2c_doxfer(struct s3c_i2c *i2c,
 		dev_dbg(i2c->dev, "incomplete xfer (%d)\n", ret);
 
 	/* ensure the stop has been through the bus */
-#if !(defined(CONFIG_MACH_CYGNUS) || defined(CONFIG_MACH_SATURN) || defined(CONFIG_MACH_SPICA))
+#if !(defined(CONFIG_MACH_CYGNUS) || defined(CONFIG_MACH_SATURN))
 	if (pdata->bus_num == 0)
 		msleep(1);
 #endif
@@ -672,7 +670,7 @@ static int s3c_i2c_clockrate(struct s3c_i2c *i2c, unsigned int *got)
 
 	dev_dbg(i2c->dev, "pdata desired frequency %lu\n", pdata->frequency);
 
-	target_frequency = pdata->frequency ? pdata->frequency : 400000;
+	target_frequency = pdata->frequency ? pdata->frequency : 100000;
 
 	target_frequency /= 1000; /* Target frequency now in KHz */
 
@@ -796,8 +794,6 @@ static int s3c_i2c_init(struct s3c_i2c *i2c)
 	}
 
 	/* todo - check that the i2c lines aren't being dragged anywhere */
-	dev_info(i2c->dev, "bus frequency set to %d KHz\n", freq);
-	dev_dbg(i2c->dev, "S3C_IICCON=0x%02lx\n", iicon);
 
 	/* check for s3c i2c controller  */
 

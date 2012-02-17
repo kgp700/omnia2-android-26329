@@ -50,7 +50,7 @@ struct platform_device s3c_device_i2c0 = {
 static struct s3c_platform_i2c default_i2c_data0 __initdata = {
 	.flags		= 0,
 	.slave_addr	= 0x10,
-	.frequency	= 400*1000,
+	.frequency	= 100*1000,
 	.sda_delay	= S3C_IICLC_SDA_DELAY5 | S3C_IICLC_FILTER_ON,
 };
 

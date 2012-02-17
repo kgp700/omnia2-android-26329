@@ -24,9 +24,6 @@ EXPORT_SYMBOL(pm_flags);
 
 /* Routines for PM-transition notifications */
 
-void (*ftm_enable_usb_sw)(int mode);
-EXPORT_SYMBOL(ftm_enable_usb_sw);
-
 static BLOCKING_NOTIFIER_HEAD(pm_chain_head);
 
 int register_pm_notifier(struct notifier_block *nb)

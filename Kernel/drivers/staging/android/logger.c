@@ -29,18 +29,31 @@
 #include <asm/ioctls.h>
 
 /* RAM Dump Info */
-
 #include <linux/sec_log.h>
 
-static struct struct_plat_log_mark plat_log_mark = {
+static struct struct_plat_log_mark plat_log_mark = { 
 	.special_mark_1 = (('*' << 24) | ('^' << 16) | ('^' << 8) | ('*' << 0)),
 	.special_mark_2 = (('I' << 24) | ('n' << 16) | ('f' << 8) | ('o' << 0)),
 	.special_mark_3 = (('H' << 24) | ('e' << 16) | ('r' << 8) | ('e' << 0)),
 	.special_mark_4 = (('p' << 24) | ('l' << 16) | ('o' << 8) | ('g' << 0)),
-	.p_main = 0, 
+	.p_main = 0,
 	.p_radio = 0,
 	.p_events = 0,
-	.p_system = 0
+	.p_system = 0,
+};
+
+static struct struct_mark_ver_mark marks_ver_mark = {
+	.special_mark_1 = (('*' << 24) | ('^' << 16) | ('^' << 8) | ('*' << 0)),
+	.special_mark_2 = (('I' << 24) | ('n' << 16) | ('f' << 8) | ('o' << 0)),
+	.special_mark_3 = (('H' << 24) | ('e' << 16) | ('r' << 8) | ('e' << 0)),
+	.special_mark_4 = (('v' << 24) | ('e' << 16) | ('r' << 8) | ('s' << 0)),
+	.log_mark_version = 1,
+	.framebuffer_mark_version = 1,
+	.this=&marks_ver_mark,
+	.first_size=128*1024*1024,
+	.first_start_addr=0x50000000,
+	.second_size=0,
+	.second_start_addr=0
 };
 
 	unsigned char klog_buf[256];
@@ -296,19 +309,6 @@ static void do_write_log(struct logger_log *log, const void *buf, size_t count)
 	size_t len;
 
 	len = min(count, log->size - log->w_off);
-
-#if 1 //LOGGER_PATCH_MMS_LOCKUP
-	if (count >= LOGGER_ENTRY_MAX_PAYLOAD) {
-		printk("\n");
-		printk("*****************************************************************\n");
-		printk("* LOGGER - ERROR  ( %s )\n", __FUNCTION__);
-		printk("* log:%s log->buffer:%x  log->w_off:%x  count:%x len:%x \n",
-		       log->misc.name, log->buffer, log->w_off, count, len);
-		printk("*****************************************************************\n");
-		return;
-	}
-#endif
-
 	memcpy(log->buffer + log->w_off, buf, len);
 
 	if (count != len)
@@ -653,11 +653,18 @@ static int __init logger_init(void)
 	if (unlikely(ret))
 		goto out;
 	/* RAM Dump Info */
-	plat_log_mark.p_main = _buf_log_main; 
+	plat_log_mark.p_main = _buf_log_main;
 	plat_log_mark.p_radio = _buf_log_radio;
 	plat_log_mark.p_events = _buf_log_events;
 	plat_log_mark.p_system = _buf_log_system;
 
+	/* 최적화에 의한 삭제 방지 */
+	marks_ver_mark.log_mark_version = 1; 
+#ifdef CONFIG_KERNEL_DEBUG_SEC 
+	extern void kernel_sec_set_log_ptrs_for_getlog(void*);
+	kernel_sec_set_log_ptrs_for_getlog(&plat_log_mark);
+	kernel_sec_set_log_ptrs_for_getlog(&marks_ver_mark);
+#endif
 out:
 	return ret;
 }

@@ -80,10 +80,7 @@ extern int s3c6410_timer_setup (int channel, int usec, unsigned long g_tcnt, uns
 #define S3C_FB_VS_MOVE_DOWN		18
 #define S3CFB_ALPHA_MODE_PLANE		0
 #define S3CFB_ALPHA_MODE_PIXEL		1
-
-#ifdef CONFIG_FB_S3C_SHOW_LOGO
 #define S3C_FB_DISPLAY_LOGO
-#endif
 
 #if defined(CONFIG_MACH_SPICA)
 	#define S3C_FB_USE_CLK_DIRECTED		// KSS_2009-09-03 : Change LCD Dot Clk
@@ -270,7 +267,7 @@ typedef struct {
 	unsigned int		fb_change_ready;
 
 	struct early_suspend	early_suspend;
-
+	
 	/* keep these registers in case we need to re-write palette */
 	unsigned int		palette_buffer[256];
 	unsigned int		pseudo_pal[16];
@@ -508,7 +505,7 @@ extern void s3cfb_start_lcd(void);
 extern void s3cfb_stop_lcd(void);
 extern int s3cfb_suspend(struct platform_device *dev, pm_message_t state);
 extern int s3cfb_resume(struct platform_device *dev);
-extern int s3cfb_shutdown(struct platform_device *dev);
+extern int s3cfb_shutdown(struct platform_device *dev);	
 extern int s3cfb_spi_gpio_request(int ch);
 extern void s3cfb_spi_lcd_den(int ch, int value);
 extern void s3cfb_spi_lcd_dseri(int ch, int value);
@@ -518,7 +515,6 @@ extern int s3cfb_spi_gpio_free(int ch);
 extern void s3cfb_pre_init(void);
 extern void s3cfb_display_logo(int win_num);
 extern void s3cfb_start_progress(void);
-extern void s3cfb_stop_progress(void);
 extern void s3cfb_set_lcd_power(int to);
 extern void s3cfb_set_backlight_power(int to);
 extern void s3cfb_set_backlight_level(int to);
@@ -533,3 +529,4 @@ extern void s3cfb_late_resume(struct early_suspend *h);
 #endif	/* CONFIG_HAS_EARLYSUSPEND */
 
 #endif
+

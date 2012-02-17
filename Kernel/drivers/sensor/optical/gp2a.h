@@ -45,10 +45,16 @@
 
 /*for light sensor */
 #define STATE_NUM				3   /* number of states */
-#define STATE_0_BRIGHTNESS    175 //160 //240 //255   /* brightness of lcd */
-#define STATE_1_BRIGHTNESS 	  95 //98 //112 //130    
-#define STATE_2_BRIGHTNESS    35 //48 //40 // lsj_test 1
 
+#if defined(CONFIG_MACH_VITAL)
+#define STATE_0_BRIGHTNESS     74//255   /* brightness of lcd */
+#define STATE_1_BRIGHTNESS 	   35//140    
+#define STATE_2_BRIGHTNESS     12//30
+#else
+#define STATE_0_BRIGHTNESS    255   /* brightness of lcd */
+#define STATE_1_BRIGHTNESS 	  140    
+#define STATE_2_BRIGHTNESS     30
+#endif
 
 
 /*
@@ -69,10 +75,15 @@
 #define ADC_CUT_LOW_M900_R3  130            /* boundary line between STATE_1 and STATE_2 */
 #define ADC_CUT_GAP_M900_R3  50            /* in order to prevent chattering condition */
 
+#if 0
 #define ADC_CUT_HIGH_M900_R4 1400            /* boundary line between STATE_0 and STATE_1 */
 #define ADC_CUT_LOW_M900_R4  250            /* boundary line between STATE_1 and STATE_2 */
 #define ADC_CUT_GAP_M900_R4  50            /* in order to prevent chattering condition */
-
+#else
+#define ADC_CUT_HIGH_M900_R4 1400            /* boundary line between STATE_0 and STATE_1 */
+#define ADC_CUT_LOW_M900_R4  700            /* boundary line between STATE_1 and STATE_2 */
+#define ADC_CUT_GAP_M900_R4  50            /* in order to prevent chattering condition */
+#endif
 
 
 /* state type */
