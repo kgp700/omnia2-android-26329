@@ -13,6 +13,9 @@
 #ifndef ASM_MACH_OMNIA_II_H
 #define ASM_MACH_OMNIA_II_H
 
+// #define SHOW_OMNIA
+#undef SHOW_OMNIA
+
 #define GPIO_LEVEL_LOW      0
 #define GPIO_LEVEL_HIGH     1
 #define GPIO_LEVEL_NONE     2
@@ -64,17 +67,27 @@
 #define GPIO_AP_SDA_AF		(2)
 
 /* GPC Group */
+#ifdef SHOW_OMNIA
+#define GPIO_WLAN_SPI_RXD	S3C64XX_GPC(0)
+#define GPIO_WLAN_SPI_RXD_AF	(2)
+#define GPIO_WLAN_SPI_CLK	S3C64XX_GPC(1)
+#define GPIO_WLAN_SPI_CLK_AF	(2)
+#define GPIO_WLAN_SPI_TXD	S3C64XX_GPC(2)
+#define GPIO_WLAN_SPI_TXD_AF	(2)
+#define GPIO_WLAN_SPI_nCS	S3C64XX_GPC(3)
+#define GPIO_WLAN_SPI_nCS_AF	(2)
+#else
 #define GPIO_TP10024		S3C64XX_GPC(0)
 #define GPIO_TP10024_AF		(1)
-
-#define GPIO_WLAN_SPI_RXD	S3C64XX_GPC(4)
-#define GPIO_WLAN_SPI_RXD_AF	(2)
-#define GPIO_WLAN_SPI_CLK	S3C64XX_GPC(5)
-#define GPIO_WLAN_SPI_CLK_AF	(2)
-#define GPIO_WLAN_SPI_TXD	S3C64XX_GPC(6)
-#define GPIO_WLAN_SPI_TXD_AF	(2)
-#define GPIO_WLAN_SPI_nCS	S3C64XX_GPC(7)
-#define GPIO_WLAN_SPI_nCS_AF	(2)
+#define GPIO_WLAN_SPI_RXD       S3C64XX_GPC(4)
+#define GPIO_WLAN_SPI_RXD_AF    (2)
+#define GPIO_WLAN_SPI_CLK       S3C64XX_GPC(5)
+#define GPIO_WLAN_SPI_CLK_AF    (2)
+#define GPIO_WLAN_SPI_TXD       S3C64XX_GPC(6)
+#define GPIO_WLAN_SPI_TXD_AF    (2)
+#define GPIO_WLAN_SPI_nCS       S3C64XX_GPC(7)
+#define GPIO_WLAN_SPI_nCS_AF    (2)
+#endif
 
 /* GPD Group */
 #define GPIO_I2S_SCLK           S3C64XX_GPD(0)
