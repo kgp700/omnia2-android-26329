@@ -241,9 +241,15 @@ struct platform_device sec_device_backlight = {
 static struct sec_headset_port sec_headset_port[] = {
         {
 		{ // HEADSET detect info
-			.eint		= IRQ_EINT(10), 
-			.gpio		= GPIO_DET_35,   
-			.gpio_af	= GPIO_DET_35_AF  , 
+#ifdef SHOW_OMNIA
+			.eint		= IRQ_EINT(9), 
+			.gpio		= GPIO_JACK_INT_N,   
+			.gpio_af	= GPIO_JACK_INT_N_AF  , 
+#else
+			.eint		= IRQ_EINT(10),
+			.gpio		= GPIO_DET_35,
+			.gpio_af	= GPIO_DET_35_AF,
+#endif
 			.low_active 	= 0
 		},{ // SEND/END info
 			.eint		= IRQ_EINT(11), 
@@ -328,7 +334,13 @@ static struct spi_board_info s3c6410_spi_board_info[] = {
                 .mode			= SPI_MODE_0,
 //                .max_speed_hz   	= 48000000,
                 .max_speed_hz   	= 24000000,
+
+#ifdef SHOW_OMNIA
+		.bus_num		= 0,
+#else
                 .bus_num		= 1,
+#endif
+
 		.irq			= IRQ_EINT(1),
                 .chip_select		= 0,
                 .controller_data	= &libertas_chip_cs,
@@ -353,7 +365,11 @@ static void __init init_spi(void)
 	gpio_set_value(GPIO_BT_EN, GPIO_LEVEL_LOW); 	
 	
 //	s3c64xx_spi_set_info(1, S3C64XX_SPI_SRCCLK_PCLK, 1);
+#ifdef SHOW_OMNIA	
+	s3c64xx_spi_set_info(0, S3C64XX_SPI_SRCCLK_SPIBUS, 1);
+#else
 	s3c64xx_spi_set_info(1, S3C64XX_SPI_SRCCLK_SPIBUS, 1);
+#endif
 	spi_register_board_info(ARRAY_AND_SIZE(s3c6410_spi_board_info));
 }
 
@@ -413,7 +429,7 @@ static void omnia_II_pm_power_off(void)
 	{	/* Power Off or Reboot */
 		if (sec_set_param_value)
 			sec_set_param_value(__REBOOT_MODE, &mode);
-		if (get_usb_cable_state() & (JIG_UART_ON | JIG_UART_OFF | JIG_USB_OFF | JIG_USB_ON)) {
+		if (/*get_usb_cable_state() &*/ (JIG_UART_ON | JIG_UART_OFF | JIG_USB_OFF | JIG_USB_ON)) {
 			/* Watchdog Reset */
 			arch_reset(reset_mode);
 		}
@@ -569,8 +585,8 @@ static struct platform_device *smdk6410_devices[] __initdata = {
         &s3c_device_dma2,
         &s3c_device_dma3,
 #endif
-	&s3c_device_hsmmc0,
 	&s3c_device_hsmmc1,
+	&s3c_device_hsmmc0,
 	&s3c_device_i2c0,
 #ifdef CONFIG_S3C_DEV_I2C1
 	&s3c_device_i2c1,
@@ -602,7 +618,12 @@ static struct platform_device *smdk6410_devices[] __initdata = {
 	&sec_device_rfkill,   //BT POWER ON-OFF
 //	&sec_device_btsleep,  //BT SLEEP-AWAKE
 	&sec_device_fuelgauge,
+
+#ifdef SHOW_OMNIA
+	&s3c64xx_device_spi0,
+#else
 	&s3c64xx_device_spi1,
+#endif
 	&s3c_device_onenand,
 };
 
@@ -764,13 +785,13 @@ void s3c_setup_keypad_cfg_gpio(int rows, int columns)
 	unsigned int end;
 
 	end = S3C64XX_GPK(8 + rows);
-
+#if 0
 	/* Set all the necessary GPK pins to special-function 0 */
 	for (gpio = S3C64XX_GPK(8); gpio < end; gpio++) {
 		s3c_gpio_cfgpin(gpio, S3C_GPIO_SFN(3));
 		s3c_gpio_setpull(gpio, S3C_GPIO_PULL_NONE);
 	}
-
+#endif
 	end = S3C64XX_GPL(0 + columns);
 
 	/* Set all the necessary GPL pins to special-function 0 */
