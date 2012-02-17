@@ -181,10 +181,7 @@ SUBARCH := $(shell uname -m | sed -e s/i.86/i386/ -e s/sun4u/sparc64/ \
 # Note: Some architectures assign CROSS_COMPILE in their arch/*/Makefile
 export KBUILD_BUILDHOST := $(SUBARCH)
 ARCH			:= arm
-CROSS_COMPILE   := /opt/cross/bin/arm-linux-gnueabi-
-#CROSS_COMPILE	:= $(shell if [ -f .cross_compile ]; then \
-					cat .cross_compile; \
-					fi)
+CROSS_COMPILE   := /root/1test/toolchain/arm-eabi-4.5.4/bin/arm-eabi-
 
 
 # Architecture as present in compile.h
@@ -331,8 +328,8 @@ MODFLAGS	= -DMODULE
 CFLAGS_MODULE   = $(MODFLAGS)
 AFLAGS_MODULE   = $(MODFLAGS)
 LDFLAGS_MODULE  = -T $(srctree)/scripts/module-common.lds
-CFLAGS_KERNEL	=
-AFLAGS_KERNEL	=
+CFLAGS_KERNEL	= -march=armv6zk -mtune=arm1176jzf-s -mfpu=vfp -marm -fsingle-precision-constant -ftree-vectorize -funswitch-loops -fprofile-correction -falign-loops
+AFLAGS_KERNEL	= -march=armv6zk -mtune=arm1176jzf-s -mfpu=vfp -marm -fsingle-precision-constant -ftree-vectorize -funswitch-loops -fprofile-correction -falign-loops
 CFLAGS_GCOV	= -fprofile-arcs -ftest-coverage
 
 
@@ -349,7 +346,10 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 		   -fno-strict-aliasing -fno-common \
 		   -Werror-implicit-function-declaration \
 		   -Wno-format-security \
-		   -fno-delete-null-pointer-checks
+		   -fno-delete-null-pointer-checks \
+		   -march=armv6zk -mtune=arm1176jzf-s -mfpu=vfp -marm \
+		   -fsingle-precision-constant -ftree-vectorize -funswitch-loops \
+		   -fprofile-correction -falign-loops
 KBUILD_AFLAGS   := -D__ASSEMBLY__
 
 # Read KERNELRELEASE from include/config/kernel.release (if it exists)
@@ -525,9 +525,9 @@ endif # $(dot-config)
 all: vmlinux
 
 ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE
-KBUILD_CFLAGS	+= -Os
+KBUILD_CFLAGS	+= -O1
 else
-KBUILD_CFLAGS	+= -O2
+KBUILD_CFLAGS	+= -O1
 endif
 
 include $(srctree)/arch/$(SRCARCH)/Makefile
@@ -538,7 +538,7 @@ endif
 
 # Force gcc to behave correct even for buggy distributions
 ifndef CONFIG_CC_STACKPROTECTOR
-KBUILD_CFLAGS += $(call cc-option, -fno-stack-protector)
+KBUILD_CFLAGS += $(call cc-option, -fno-stack-protector,)
 endif
 
 ifdef CONFIG_FRAME_POINTER
