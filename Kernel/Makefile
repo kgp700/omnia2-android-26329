@@ -328,8 +328,8 @@ MODFLAGS	= -DMODULE
 CFLAGS_MODULE   = $(MODFLAGS)
 AFLAGS_MODULE   = $(MODFLAGS)
 LDFLAGS_MODULE  = -T $(srctree)/scripts/module-common.lds
-CFLAGS_KERNEL	= -march=armv6zk -mtune=arm1176jzf-s -mfpu=vfp -marm -fsingle-precision-constant -ftree-vectorize -funswitch-loops -fprofile-correction -falign-loops
-AFLAGS_KERNEL	= -march=armv6zk -mtune=arm1176jzf-s -mfpu=vfp -marm -fsingle-precision-constant -ftree-vectorize -funswitch-loops -fprofile-correction -falign-loops
+CFLAGS_KERNEL	= -march=armv6zk -mtune=arm1176jzf-s -mfpu=vfp -marm -fsingle-precision-constant -ftree-vectorize -fprofile-correction -falign-loops
+AFLAGS_KERNEL	= -march=armv6zk -mtune=arm1176jzf-s -mfpu=vfp -marm -fsingle-precision-constant -ftree-vectorize -fprofile-correction -falign-loops
 CFLAGS_GCOV	= -fprofile-arcs -ftest-coverage
 
 
@@ -348,7 +348,7 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 		   -Wno-format-security \
 		   -fno-delete-null-pointer-checks \
 		   -march=armv6zk -mtune=arm1176jzf-s -mfpu=vfp -marm \
-		   -fsingle-precision-constant -ftree-vectorize -funswitch-loops \
+		   -fsingle-precision-constant -ftree-vectorize \
 		   -fprofile-correction -falign-loops
 KBUILD_AFLAGS   := -D__ASSEMBLY__
 
@@ -525,9 +525,9 @@ endif # $(dot-config)
 all: vmlinux
 
 ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE
-KBUILD_CFLAGS	+= -O1
+KBUILD_CFLAGS	+= -O2
 else
-KBUILD_CFLAGS	+= -O1
+KBUILD_CFLAGS	+= -O2
 endif
 
 include $(srctree)/arch/$(SRCARCH)/Makefile

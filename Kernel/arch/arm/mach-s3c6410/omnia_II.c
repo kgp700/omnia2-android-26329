@@ -821,14 +821,14 @@ void s3c_setup_uart_cfg_gpio(unsigned char port)
 		s3c_gpio_cfgpin(GPIO_AP_BT_RTS, S3C_GPIO_SFN(GPIO_AP_BT_RTS_AF));
 		s3c_gpio_setpull(GPIO_AP_BT_RTS, S3C_GPIO_PULL_NONE);
 	}
-#if 0  // dgahn.temp
+
 	else if (port == 2) {
 		s3c_gpio_cfgpin(GPIO_AP_RXD, S3C_GPIO_SFN(GPIO_AP_RXD_AF));
 		s3c_gpio_setpull(GPIO_AP_RXD, S3C_GPIO_PULL_NONE);
 		s3c_gpio_cfgpin(GPIO_AP_TXD, S3C_GPIO_SFN(GPIO_AP_TXD_AF));
 		s3c_gpio_setpull(GPIO_AP_TXD, S3C_GPIO_PULL_NONE);
 	}
-#endif
+
 }
 EXPORT_SYMBOL(s3c_setup_uart_cfg_gpio);
 
@@ -852,14 +852,14 @@ void s3c_reset_uart_cfg_gpio(unsigned char port)
 		s3c_gpio_cfgpin(GPIO_AP_BT_RTS, 0);
 		s3c_gpio_setpull(GPIO_AP_BT_RTS, S3C_GPIO_PULL_DOWN);
 	}
-#if 0  // dgahn.temp
+
 	else if (port == 2) {
 		s3c_gpio_cfgpin(GPIO_AP_RXD, S3C_GPIO_SFN(GPIO_AP_RXD_AF));
 		s3c_gpio_setpull(GPIO_AP_RXD, S3C_GPIO_PULL_NONE);
 		s3c_gpio_cfgpin(GPIO_AP_TXD, S3C_GPIO_SFN(GPIO_AP_TXD_AF));
 		s3c_gpio_setpull(GPIO_AP_TXD, S3C_GPIO_PULL_NONE);
 	}
-#endif
+
 }
 EXPORT_SYMBOL(s3c_reset_uart_cfg_gpio);
 
