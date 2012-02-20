@@ -29,11 +29,11 @@
  * It helps to keep variable names smaller, simpler
  */
 
-#define DEF_FREQUENCY_UP_THRESHOLD		(90)
-#define DEF_FREQUENCY_DOWN_THRESHOLD		(70)
+#define DEF_FREQUENCY_UP_THRESHOLD		(98)
+#define DEF_FREQUENCY_DOWN_THRESHOLD		(60)
 #ifdef CONFIG_CPU_S3C6410
 #define DEF_MAX_FREQ_TIME_HZ			(15*HZ)
-#define DEF_SAMPLING_FREQ_STEP	40
+#define DEF_SAMPLING_FREQ_STEP	30
 extern int dvfs_change_quick;
 static int dvfs_max_freq_cnt = 0;
 extern unsigned int s3c64xx_target_frq(unsigned int pred_freq, int flag);
