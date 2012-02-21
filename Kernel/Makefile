@@ -347,7 +347,7 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 		   -Werror-implicit-function-declaration \
 		   -Wno-format-security \
 		   -fno-delete-null-pointer-checks \
-		   -march=armv6zk -mtune=arm1176jzf-s -mfpu=vfp -marm \
+		   -march=armv6zk -mtune=arm1176jzf-s -mfpu=vfp -marm -mfloat-abi=softfp \
 		   -fsingle-precision-constant -ftree-vectorize \
 		   -fprofile-correction -falign-loops
 KBUILD_AFLAGS   := -D__ASSEMBLY__
